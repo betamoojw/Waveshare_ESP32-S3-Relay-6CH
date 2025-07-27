@@ -1,19 +1,22 @@
-#include "HWCDC.h"
 #include <Arduino.h>
+#include "HWCDC.h"
+#include "cli_interface.h"
 
 HWCDC USBSerial; // Definition of the USBSerial object
 
 void setup()
 {
+    String title = "Relay Controller";
     USBSerial.begin(115200);
-    USBSerial.println("USBSerial initialized.");
 
-    String title = "Smart Panel";
     USBSerial.println(title + " start");
+
+    cli_init();
+
+    USBSerial.println(title + " end");
 }
 
 void loop()
 {
-    USBSerial.println("Hello World");
-    delay(2000);
+    cli_task();
 }
