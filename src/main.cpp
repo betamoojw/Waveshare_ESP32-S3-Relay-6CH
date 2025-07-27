@@ -1,12 +1,19 @@
+#include "HWCDC.h"
 #include <Arduino.h>
 
-void setup() {
-  Serial.begin(115200);
-  while (!Serial);
-  
+HWCDC USBSerial; // Definition of the USBSerial object
+
+void setup()
+{
+    USBSerial.begin(115200);
+    USBSerial.println("USBSerial initialized.");
+
+    String title = "Smart Panel";
+    USBSerial.println(title + " start");
 }
 
-void loop() {
-  Serial.println("Hello World");
-  delay(2000);
+void loop()
+{
+    USBSerial.println("Hello World");
+    delay(2000);
 }
