@@ -56,18 +56,30 @@ void cli_init()
                                 (void *)"Relay Controller",
                                 cli_hello});
 
-    embeddedCliAddBinding(cli, {"get-led",
-                                "Get led status",
+    embeddedCliAddBinding(cli, {"get-led-brightness",
+                                "Get LED brightness",
                                 true,
                                 nullptr,
-                                cli_get_led});
+                                cli_get_led_brightness});
 
-    embeddedCliAddBinding(cli, {"set-led",
-                                "Set led status",
+    embeddedCliAddBinding(cli, {"set-led-brightness",
+                                "Set LED brightness",
                                 true,
                                 nullptr,
-                                cli_set_led});
-    
+                                cli_set_led_brightness});
+
+    embeddedCliAddBinding(cli, {"get-led-color",
+                                "Get led color",
+                                true,
+                                nullptr,
+                                cli_get_led_color});
+
+    embeddedCliAddBinding(cli, {"set-led-color",
+                                "Set led color",
+                                true,
+                                nullptr,
+                                cli_set_led_color});
+
     embeddedCliAddBinding(cli, {"get-relay",
                                 "Get relay status",
                                 true,

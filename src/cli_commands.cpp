@@ -2,6 +2,7 @@
 #include "HWCDC.h"
 #include "relay_control.h"
 #include "buzzer_control.h"
+#include "digital_led_control.h"
 
 extern HWCDC USBSerial; // Declaration of the external USBSerial object
 
@@ -57,34 +58,79 @@ void cli_hello(EmbeddedCli *cli, char *args, void *context)
     USBSerial.print("\r\n");
 }
 
-void cli_get_led(EmbeddedCli *cli, char *args, void *context)
+void cli_get_led_brightness(EmbeddedCli *cli, char *args, void *context)
 {
-    const char *arg1 = embeddedCliGetToken(args, 1);
-    if (arg1 == NULL) 
-    {
-        USBSerial.println("Usage: get-led [arg1]");
-        return;
-    }
+    // Set the LED color using the DigitalLedControl class
+    DigitalLedControl& ledControl = DigitalLedControl::getInstance();
+    uint8_t color = ledControl.getBrightness();
 
     // Make sure to check if 'args' != NULL, printf's '%s' formatting does not like a null pointer.
     char msg[64];
-    snprintf(msg, sizeof(msg), "Get LED with args: %s, status: %d", arg1, random(0, 2));
+    snprintf(msg, sizeof(msg), "Get LED brightness: %d", color);
     USBSerial.println(msg);
 }
-void cli_set_led(EmbeddedCli *cli, char *args, void *context)
+
+void cli_set_led_brightness(EmbeddedCli *cli, char *args, void *context)
 {
-    if ((args == NULL) || (embeddedCliGetTokenCount(args) < 2))
+    if ((args == NULL) || (embeddedCliGetTokenCount(args) < 1))
     {
-        USBSerial.println("Usage: set-led [arg1] [arg2]");
+        USBSerial.println("Usage: set-led-brightness [arg1]");
+        return;
+    }
+
+    const char *arg1 = embeddedCliGetToken(args, 1);
+    uint8_t brightness = constrain(atoi(arg1), 0, 255); // Constrain brightness value
+
+    // Set the LED brightness using the DigitalLedControl class
+    DigitalLedControl& ledControl = DigitalLedControl::getInstance();
+    ledControl.setBrightness(brightness); 
+
+    // Make sure to check if 'args' != NULL, printf's '%s' formatting does not like a null pointer.
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Set LED brightness: %d", brightness);
+    USBSerial.println(msg);
+}   
+
+void cli_get_led_color(EmbeddedCli *cli, char *args, void *context)
+{
+    // Set the LED color using the DigitalLedControl class
+    DigitalLedControl& ledControl = DigitalLedControl::getInstance();
+    uint32_t color = ledControl.getColor();
+    uint8_t rVal = (color >> 16) & 0xFF;
+    uint8_t gVal = (color >> 8) & 0xFF;
+    uint8_t bVal = color & 0xFF;
+
+    // Make sure to check if 'args' != NULL, printf's '%s' formatting does not like a null pointer.
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Get LED color: %d, R-%d, G-%d, B-%d", color, rVal, gVal, bVal);
+    USBSerial.println(msg);
+}
+
+void cli_set_led_color(EmbeddedCli *cli, char *args, void *context)
+{
+    if ((args == NULL) || (embeddedCliGetTokenCount(args) < 3))
+    {
+        USBSerial.println("Usage: set-led [arg1] [arg2] [arg3]");
         return;
     }
 
     const char *arg1 = embeddedCliGetToken(args, 1);
     const char *arg2 = embeddedCliGetToken(args, 2);
+    const char *arg3 = embeddedCliGetToken(args, 3);
 
-    // Make sure to check if 'args' != NULL, printf's '%s' formatting does not like a null pointer.
-    char msg[64];
-    snprintf(msg, sizeof(msg), "Set LED with args: %s and %s", arg1, arg2);
+    uint8_t rVal = constrain(atoi(arg1), 0, 255); // Constrain red value
+    uint8_t gVal = constrain(atoi(arg2), 0, 255); // Constrain green value
+    uint8_t bVal = constrain(atoi(arg3), 0, 255); // Constrain blue value
+
+    // Set the LED color using the DigitalLedControl class
+    DigitalLedControl& ledControl = DigitalLedControl::getInstance();
+    uint8_t brightness = ledControl.getBrightness();
+    ledControl.setBrightness(brightness);
+    ledControl.setColor(rVal, gVal, bVal);
+
+    // Print the result
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Set LED with RGB values: R-%d, G-%d, B-%d", rVal, gVal, bVal);
     USBSerial.println(msg);
 }
 

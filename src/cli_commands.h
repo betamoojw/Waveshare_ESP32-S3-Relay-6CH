@@ -10,8 +10,11 @@ void cli_version(EmbeddedCli *cli, char *args, void *context);
 void cli_reboot(EmbeddedCli *cli, char *args, void *context);
 void cli_hello(EmbeddedCli *cli, char *args, void *context);
 
-void cli_get_led(EmbeddedCli *cli, char *args, void *context);
-void cli_set_led(EmbeddedCli *cli, char *args, void *context);
+void cli_get_led_brightness(EmbeddedCli *cli, char *args, void *context);
+void cli_set_led_brightness(EmbeddedCli *cli, char *args, void *context);
+
+void cli_get_led_color(EmbeddedCli *cli, char *args, void *context);
+void cli_set_led_color(EmbeddedCli *cli, char *args, void *context);
 
 void cli_get_relay(EmbeddedCli *cli, char *args, void *context);
 void cli_set_relay(EmbeddedCli *cli, char *args, void *context);
