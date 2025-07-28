@@ -1,6 +1,7 @@
 #include "cli_commands.h"
 #include "HWCDC.h"
-#include  "relay_control.h"
+#include "relay_control.h"
+#include "buzzer_control.h"
 
 extern HWCDC USBSerial; // Declaration of the external USBSerial object
 
@@ -205,5 +206,31 @@ void cli_toggle_relay(EmbeddedCli *cli, char *args, void *context)
     // Make sure to check if 'args' != NULL, printf's '%s' formatting does not like a null pointer.
     char msg[128];
     snprintf(msg, sizeof(msg), "Toggle relay - %d; new status %s", channel, status ? "ON" : "OFF");
+    USBSerial.println(msg);
+}
+
+void cli_ctrl_buzzer(EmbeddedCli *cli, char *args, void *context)
+{
+    const char *arg1 = embeddedCliGetToken(args, 1);
+    if (arg1 == NULL) 
+    {
+        USBSerial.println("Usage: ctrl-buzzer [arg1]");
+        return;
+    }
+
+    const uint8_t tone = atoi(arg1);
+    // Validate tone
+    if (tone < 0 || tone >= 8) 
+    {    
+        USBSerial.println("Invalid channel number. Use a number between 0 and 7.");
+        return;
+    }
+
+    BuzzerControl& buzzer = BuzzerControl::getInstance();
+    buzzer.playTone(tone); 
+
+    // Make sure to check if 'args' != NULL, printf's '%s' formatting does not like a null pointer.
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Control buzzer with tone %d", tone);
     USBSerial.println(msg);
 }

@@ -17,9 +17,9 @@
 #define GPIO_PIN_Buzzer   21    // Buzzer Control GPIO
 
 /***********************************************************  Buzzer  ***********************************************************/
-#define PWM_Channel     1       // PWM Channel   
-#define Frequency       1000     // PWM frequencyconst
-#define Resolution      8       // PWM resolution ratio
+#define PWM_Channel     0       // PWM Channel   
+#define Frequency       2000    // 2 kHz PWM frequencyconst
+#define Resolution      8       // 8 bits PWM resolution ratio
 #define Dutyfactor      200     // PWM Dutyfactor
 
 #endif

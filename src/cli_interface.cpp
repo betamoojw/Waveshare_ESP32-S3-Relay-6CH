@@ -85,6 +85,12 @@ void cli_init()
                                 true,
                                 nullptr,
                                 cli_toggle_relay});
+
+    embeddedCliAddBinding(cli, {"ctrl-buzzer",
+                                "Control buzzer with a tone between 0 and 7",
+                                true,
+                                nullptr,
+                                cli_ctrl_buzzer});
     // Add more commands as needed
 
     cli->onCommand = cli_command;
