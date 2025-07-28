@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "HWCDC.h"
 #include "cli_interface.h"
+#include "relay_control.h"
 
 HWCDC USBSerial; // Definition of the USBSerial object
 

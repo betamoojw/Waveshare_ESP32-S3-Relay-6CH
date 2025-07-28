@@ -53,7 +53,7 @@ void cli_init()
     embeddedCliAddBinding(cli, {"hello",
                                 "Print hello message",
                                 true,
-                                (void *)"Smart Panel",
+                                (void *)"Relay Controller",
                                 cli_hello});
 
     embeddedCliAddBinding(cli, {"get-led",
@@ -67,7 +67,24 @@ void cli_init()
                                 true,
                                 nullptr,
                                 cli_set_led});
+    
+    embeddedCliAddBinding(cli, {"get-relay",
+                                "Get relay status",
+                                true,
+                                nullptr,
+                                cli_get_relay});
 
+    embeddedCliAddBinding(cli, {"set-relay",
+                                "Set relay status",
+                                true,
+                                nullptr,
+                                cli_set_relay});
+
+    embeddedCliAddBinding(cli, {"toggle-relay",
+                                "Toggle relay status",
+                                true,
+                                nullptr,
+                                cli_toggle_relay});
     // Add more commands as needed
 
     cli->onCommand = cli_command;
@@ -78,7 +95,10 @@ void cli_init()
 void cli_task()
 {
     if (cli == NULL)
+    {
+        USBSerial.println(F("Cli is not initialized!"));
         return;
+    }
 
     while (USBSerial.available() > 0)
     {

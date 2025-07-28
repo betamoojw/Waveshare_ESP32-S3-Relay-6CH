@@ -13,4 +13,8 @@ void cli_hello(EmbeddedCli *cli, char *args, void *context);
 void cli_get_led(EmbeddedCli *cli, char *args, void *context);
 void cli_set_led(EmbeddedCli *cli, char *args, void *context);
 
+void cli_get_relay(EmbeddedCli *cli, char *args, void *context);
+void cli_set_relay(EmbeddedCli *cli, char *args, void *context);
+void cli_toggle_relay(EmbeddedCli *cli, char *args, void *context);
+
 #endif
