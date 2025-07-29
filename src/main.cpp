@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "HWCDC.h"
 #include "cli_interface.h"
+#include "btn_interface.h"
 #include "relay_control.h"
 #include "UARTCommunication.h"
 #include "board_def.h"
@@ -27,6 +28,12 @@ void setup()
         delay(1000);
     }
 
+    // Get the singleton instance of BtnInterface
+    BtnInterface& btnInterface = BtnInterface::getInstance();
+
+    // Initialize the button interface with the specified pin
+    btnInterface.initialize(GPIO_PIN_BTN);
+
     cli_init();
 
     USBSerial.println(title + " end");
@@ -48,9 +55,13 @@ void loop()
     {
         USBSerial.println("Received: " + String(received.c_str()));
     } 
-    else 
-    {
-        USBSerial.println("No data received.");
-    }
+    
+    // Get the singleton instance of BtnInterface
+    BtnInterface& btnInterface = BtnInterface::getInstance();
+
+    // Update the button state
+    btnInterface.update();
+
+
     delay(100); // Add a small delay to avoid flooding the serial output
 }

@@ -12,6 +12,8 @@
 #define GPIO_PIN_CH5      45    // CH5 Control GPIO
 #define GPIO_PIN_CH6      46    // CH6 Control GPIO
 
+#define GPIO_PIN_BTN      0     // Button GPIO
+
 #define GPIO_PIN_RGB      38    // RGB Control GPIO
 
 #define GPIO_PIN_Buzzer   21    // Buzzer Control GPIO
