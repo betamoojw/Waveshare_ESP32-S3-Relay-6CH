@@ -166,63 +166,76 @@ void cli_get_relay(EmbeddedCli *cli, char *args, void *context)
 }
 void cli_set_relay(EmbeddedCli *cli, char *args, void *context)
 {
-    if ((args == NULL) || (embeddedCliGetTokenCount(args) < 2))
+    if ((args == NULL) || (embeddedCliGetTokenCount(args) < 1))
     {
-        USBSerial.println("Usage: set-relay [arg1] [arg2]");
+        USBSerial.println("Usage: set-relay [channel] [on/off] or set-relay all [on/off]");
         return;
     }
 
     const char *arg1 = embeddedCliGetToken(args, 1);
-    const char *arg2 = embeddedCliGetToken(args, 2);
+
+    RelayControl& relayCtrl = RelayControl::getInstance();
+
+    // Handle "all" command
+    if (strcmp(arg1, "all") == 0)
+    {
+        if (embeddedCliGetTokenCount(args) < 2)
+        {
+            USBSerial.println("Usage: set-relay all [on/off]");
+            return;
+        }
+
+        const char *arg2 = embeddedCliGetToken(args, 2);
+        if (strcmp(arg2, "on") == 0 || strcmp(arg2, "1") == 0)
+        {
+            relayCtrl.allOn();
+            USBSerial.println("All relays turned ON.");
+        }
+        else if (strcmp(arg2, "off") == 0 || strcmp(arg2, "0") == 0)
+        {
+            relayCtrl.allOff();
+            USBSerial.println("All relays turned OFF.");
+        }
+        else
+        {
+            USBSerial.println("Invalid state. Use 'on' or 'off'.");
+        }
+        return;
+    }
+
+    // Handle specific channel command
+    if (embeddedCliGetTokenCount(args) < 2)
+    {
+        USBSerial.println("Usage: set-relay [channel] [on/off]");
+        return;
+    }
 
     const uint8_t channel = atoi(arg1);
-    // Validate channel number
-    if (channel < 0 || channel >= RELAY_CHANNEL_COUNT) 
-    {    
+    if (channel < 0 || channel >= RELAY_CHANNEL_COUNT)
+    {
         USBSerial.println("Invalid channel number. Use a number between 0 and 5.");
         return;
     }
 
-    // Validate state
-    if (arg2 == NULL) 
-    {
-        USBSerial.println("Invalid state. Use on/1 or off/0.");
-        return;
-    }
-    // Convert arg2 to boolean state
-    // Assuming arg2 is either "on", "off", "1", or "0"
-    // If arg2 is not one of these, we will return an error message
-    RelayControl& relayCtrl = RelayControl::getInstance();
+    const char *arg2 = embeddedCliGetToken(args, 2);
     bool newState = false;
-    if ((strcmp(arg2, "on") == 0) || (strcmp(arg2, "1") == 0))
+
+    if (strcmp(arg2, "on") == 0 || strcmp(arg2, "1") == 0)
     {
         newState = true;
     }
-    else if ((strcmp(arg2, "off") == 0) || (strcmp(arg2, "0") == 0))
+    else if (strcmp(arg2, "off") == 0 || strcmp(arg2, "0") == 0)
     {
         newState = false;
     }
-    else if (strcmp(arg2, "ON") == 0)
-    {
-        relayCtrl.allOn();
-        USBSerial.println("All relays turned ON.");
-        return;
-    }
-    else if (strcmp(arg2, "OFF") == 0)
-    {
-        relayCtrl.allOff();
-        USBSerial.println("All relays turned OFF.");
-        return;
-    }
     else
     {
-        USBSerial.println("Invalid state. Use on/1 or off/0, ON/OFF for all relays.");
+        USBSerial.println("Invalid state. Use 'on' or 'off'.");
         return;
-    }   
-    
+    }
+
     relayCtrl.setChannel(channel, newState);
 
-    // Make sure to check if 'args' != NULL, printf's '%s' formatting does not like a null pointer.
     char msg[128];
     snprintf(msg, sizeof(msg), "Set relay - %d; status %s", channel, newState ? "ON" : "OFF");
     USBSerial.println(msg);
