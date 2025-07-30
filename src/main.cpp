@@ -44,24 +44,18 @@ void loop()
     cli_task();
 
     UARTCommunication& uartComm = UARTCommunication::getInstance();
-
-    uartComm.sendData("Data from uartComm RS485.\n");
-
-    // Receive data from UART
     std::string received = uartComm.receiveData();
-    delay(100);
-    
+
+    // If data is received, print it to the USBSerial    
     if (!received.empty()) 
     {
-        USBSerial.println("Received: " + String(received.c_str()));
-    } 
-    
+        USBSerial.println("Msg from UART: " + String(received.c_str()));
+    }
+    delay(100); // Add a small delay to avoid flooding the serial output
+
     // Get the singleton instance of BtnInterface
     BtnInterface& btnInterface = BtnInterface::getInstance();
 
     // Update the button state
     btnInterface.update();
-
-
-    delay(100); // Add a small delay to avoid flooding the serial output
 }

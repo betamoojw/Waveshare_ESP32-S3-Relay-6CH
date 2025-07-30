@@ -4,6 +4,7 @@
 #include <string>
 #include <HardwareSerial.h> // ESP32 built-in serial port library
 #include "ComInterface.h"
+#include "board_def.h"
 
 class UARTCommunication : public CommunicationInterface 
 {
@@ -38,15 +39,15 @@ public:
 
 private:
     // Private constructor for Singleton
-    UARTCommunication(int uartPort = 1, RS485BaudRate baudRate = RS485BaudRate::BAUD_9600, int rxdPin = -1, int txdPin = -1);
+    UARTCommunication(int uartPort = 1, RS485BaudRate baudRate = RS485BaudRate::BAUD_9600, int rxdPin = RXD1, int txdPin = TXD1);
 
     // Private destructor
     ~UARTCommunication() override;
 
     int uartPort;                  // UART port number
     RS485BaudRate baudRate;        // Baud rate
-    int rxdPin;                    // RXD pin
-    int txdPin;                    // TXD pin
+    int rxdPin = RXD1;                    // RXD pin
+    int txdPin = TXD1;                    // TXD pin
     HardwareSerial* hwSerial;      // Pointer to HardwareSerial instance
 
     void setupUART();              // Setup UART

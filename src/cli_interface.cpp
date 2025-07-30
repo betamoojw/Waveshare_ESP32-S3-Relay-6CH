@@ -103,6 +103,12 @@ void cli_init()
                                 true,
                                 nullptr,
                                 cli_ctrl_buzzer});
+                                
+    embeddedCliAddBinding(cli, {"uart-send-data",
+                                "Send data over UART",
+                                true,
+                                nullptr,
+                                cli_uart_send_data});
     // Add more commands as needed
 
     cli->onCommand = cli_command;

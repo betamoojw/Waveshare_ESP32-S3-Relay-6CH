@@ -22,4 +22,6 @@ void cli_toggle_relay(EmbeddedCli *cli, char *args, void *context);
 
 void cli_ctrl_buzzer(EmbeddedCli *cli, char *args, void *context);
 
+void cli_uart_send_data(EmbeddedCli *cli, char *args, void *context);
+
 #endif

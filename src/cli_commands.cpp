@@ -3,6 +3,7 @@
 #include "relay_control.h"
 #include "buzzer_control.h"
 #include "digital_led_control.h"
+#include "UARTCommunication.h"
 
 extern HWCDC USBSerial; // Declaration of the external USBSerial object
 
@@ -291,5 +292,35 @@ void cli_ctrl_buzzer(EmbeddedCli *cli, char *args, void *context)
     // Make sure to check if 'args' != NULL, printf's '%s' formatting does not like a null pointer.
     char msg[64];
     snprintf(msg, sizeof(msg), "Control buzzer with tone %d", tone);
+    USBSerial.println(msg);
+}
+
+void cli_uart_send_data(EmbeddedCli *cli, char *args, void *context)
+{
+    if ((args == NULL) || (embeddedCliGetTokenCount(args) < 1))
+    {
+        USBSerial.println("Usage: uart-send-data [data]");
+        return;
+    }
+
+    // Extract the data to send
+    const char *data = embeddedCliGetToken(args, 1);
+
+    // Get the singleton instance of UARTCommunication
+    UARTCommunication &uartCom = UARTCommunication::getInstance();
+
+    // Check if UART is initialized and connected
+    if (!uartCom.isConnected())
+    {
+        USBSerial.println("Error: UART is not initialized or connected.");
+        return;
+    }
+
+    // Send the data over UART
+    uartCom.sendData(data);
+
+    // Log the sent data
+    char msg[128];
+    snprintf(msg, sizeof(msg), "UART data sent: %s", data);
     USBSerial.println(msg);
 }
