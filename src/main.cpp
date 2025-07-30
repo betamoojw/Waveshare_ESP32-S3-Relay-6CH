@@ -4,9 +4,12 @@
 #include "btn_interface.h"
 #include "relay_control.h"
 #include "UARTCommunication.h"
+#include "XctrlProtocol.h"
 #include "board_def.h"
 
 HWCDC USBSerial; // Definition of the USBSerial object
+
+XctrlProtocol xctrlProtocol; // Create an instance of XctrlProtocol
 
 void setup()
 {
@@ -23,6 +26,12 @@ void setup()
 
         // Send a test message
         uartComm.sendData("UART initialized on Serial1 with TXD1 and RXD1.\n");
+
+        // Connect the protocol to the UART communication interface
+        xctrlProtocol.connect(&uartComm);
+
+        // Initialize the protocol
+        xctrlProtocol.initialize();
 
         // Wait for a second
         delay(1000);
@@ -50,6 +59,12 @@ void loop()
     if (!received.empty()) 
     {
         USBSerial.println("Msg from UART: " + String(received.c_str()));
+
+        // Check if the received data equals "help"
+        if (received == "help") 
+        {
+            xctrlProtocol.showHelp(); // Execute the showHelp() function
+        }
     }
     delay(100); // Add a small delay to avoid flooding the serial output
 
