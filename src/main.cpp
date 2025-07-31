@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "HWCDC.h"
+#include <Logger.h>
 #include "cli_interface.h"
 #include "btn_interface.h"
 #include "relay_control.h"
@@ -7,16 +7,16 @@
 #include "XctrlProtocol.h"
 #include "board_def.h"
 
-HWCDC USBSerial; // Definition of the USBSerial object
 
 XctrlProtocol xctrlProtocol; // Create an instance of XctrlProtocol
+
+#define TAG "SYSTEM"
 
 void setup()
 {
     String title = "Relay Controller";
-    USBSerial.begin(115200);
 
-    USBSerial.println(title + " start");
+    LOG_I(TAG, title + " booting start");
 
     {
         // Initialize UART communication
@@ -45,7 +45,7 @@ void setup()
 
     cli_init();
 
-    USBSerial.println(title + " end");
+    LOG_I(TAG, title + " booting end");
 }
 
 void loop()
@@ -55,10 +55,10 @@ void loop()
     UARTCommunication& uartComm = UARTCommunication::getInstance();
     std::string received = uartComm.receiveData();
 
-    // If data is received, print it to the USBSerial    
+    // If data is received, print it to the SERIAL console
     if (!received.empty()) 
     {
-        USBSerial.println("Msg from UART: " + String(received.c_str()));
+        LOG_I(TAG, "Msg from UART: " + String(received.c_str()));
 
         // Check if the received data equals "help"
         if (received == "help") 
@@ -66,7 +66,7 @@ void loop()
             xctrlProtocol.showHelp(); // Execute the showHelp() function
         }
     }
-    delay(100); // Add a small delay to avoid flooding the serial output
+    delay(100); // Add a small delay to avoid flooding the SERIAL console
 
     // Get the singleton instance of BtnInterface
     BtnInterface& btnInterface = BtnInterface::getInstance();

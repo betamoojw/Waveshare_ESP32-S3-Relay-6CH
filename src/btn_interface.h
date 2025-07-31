@@ -2,9 +2,6 @@
 #define BTN_INTERFACE_H
 
 #include <Button2.h>
-#include "HWCDC.h"
-
-extern HWCDC USBSerial; // External USBSerial object for logging
 
 class BtnInterface 
 {

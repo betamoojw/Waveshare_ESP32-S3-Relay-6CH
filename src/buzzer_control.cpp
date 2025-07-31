@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include "HWCDC.h"
 #include "buzzer_control.h"
 
 // Static method to get the singleton instance

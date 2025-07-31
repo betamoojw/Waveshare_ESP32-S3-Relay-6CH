@@ -1,10 +1,9 @@
 #include "XctrlProtocol.h"
 #include <iostream>
 #include "relay_control.h"
-#include "HWCDC.h"
+#include <Logger.h>
 
-
-extern HWCDC USBSerial; // Declaration of the external USBSerial object
+#define TAG "XctrlProtocol"
 
 // Constructor
 XctrlProtocol::XctrlProtocol() : comm(nullptr) 
@@ -133,15 +132,9 @@ void XctrlProtocol::receiveData(uint8_t* buf, uint8_t length)
 // Show help information for the protocol
 void XctrlProtocol::showHelp() 
 {
-    USBSerial.println("XctrlProtocol: Help - This protocol uses the XCTRL format for communication.");
-
-    char msg[256];
-    snprintf(msg, sizeof(msg), "sa switch <channel> 0-1: set (1) / reset (0) channel a-%c", RELAY_CHANNEL_COUNT - 1 + 'a');
-    USBSerial.println(msg);
-
-    snprintf(msg, sizeof(msg), "sa toggle <channel>: toggle channel a-%c", RELAY_CHANNEL_COUNT - 1 + 'a');
-    USBSerial.println(msg);
-
-    USBSerial.println("sa run test mode: Test all channels one after the other.");
+    LOG_I(TAG, "XctrlProtocol: Help - This protocol uses the XCTRL format for communication.");
+    LOG_I(TAG, "sa switch <channel> 0-1: set (1) / reset (0) channel a-%c", RELAY_CHANNEL_COUNT - 1 + 'a');
+    LOG_I(TAG, "sa toggle <channel>: toggle channel a-%c", RELAY_CHANNEL_COUNT - 1 + 'a');
+    LOG_I(TAG, "sa run test mode: Test all channels one after the other.");
 }
 
