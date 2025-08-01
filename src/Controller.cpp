@@ -1,10 +1,10 @@
 #include "Controller.h"
 #include "cli_interface.h"
-#include "btn_interface.h"
-#include "relay_control.h"
-#include "UARTCommunication.h"
+#include "peripherals/btn_interface.h"
+#include "peripherals/relay_control.h"
+#include "peripherals/UARTCommunication.h"
 #include "XctrlProtocol.h"
-#include "board_def.h"
+#include "peripherals/board_def.h"
 
 
 #include <Arduino.h>

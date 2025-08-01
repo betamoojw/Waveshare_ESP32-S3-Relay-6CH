@@ -1,9 +1,10 @@
 #include "cli_commands.h"
+#include "peripherals/relay_control.h"
+#include "peripherals/buzzer_control.h"
+#include "peripherals/digital_led_control.h"
+#include "peripherals/UARTCommunication.h"
+
 #include <Logger.h>
-#include "relay_control.h"
-#include "buzzer_control.h"
-#include "digital_led_control.h"
-#include "UARTCommunication.h"
 
 #define TAG "CLI-COMMANDS"
 

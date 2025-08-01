@@ -1,7 +1,8 @@
 #include "XctrlProtocol.h"
-#include <iostream>
-#include "relay_control.h"
+
+#include "peripherals/relay_control.h"
 #include <Logger.h>
+#include <iostream>
 
 
 XctrlProtocol xctrlProtocol; // Create an instance of XctrlProtocol

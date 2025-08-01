@@ -2,8 +2,8 @@
 #define XCTRL_PROTOCOL_H
 
 #include "Protocol.h"
-#include "ComInterface.h"
-#include "UARTCommunication.h"
+#include "peripherals/ComInterface.h"
+#include "peripherals/UARTCommunication.h"
 #include <string>
 
 class XctrlProtocol : public Protocol 

@@ -2,7 +2,7 @@
 #define PROTOCOL_H
 
 #include <string>
-#include "ComInterface.h"   
+#include "peripherals/ComInterface.h"   
 
 class Protocol 
 {
