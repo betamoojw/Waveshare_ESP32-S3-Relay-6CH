@@ -32,4 +32,6 @@ private:
     CommunicationInterface* comm; // Pointer to the communication interface
 };
 
+extern  XctrlProtocol xctrlProtocol;
+
 #endif // XCTRL_PROTOCOL_H

@@ -3,6 +3,9 @@
 #include "relay_control.h"
 #include <Logger.h>
 
+
+XctrlProtocol xctrlProtocol; // Create an instance of XctrlProtocol
+
 #define TAG "XctrlProtocol"
 
 // Constructor
