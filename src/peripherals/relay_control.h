@@ -29,6 +29,7 @@ public:
     RelayControl(const RelayControl&) = delete;
     RelayControl& operator=(const RelayControl&) = delete;
 
+    inline uint8_t getChannelCount() const { return RELAY_CHANNEL_COUNT; }
     void setChannel(uint8_t channel, bool state);
     bool getChannel(uint8_t channel);
     void toggleChannel(uint8_t channel);

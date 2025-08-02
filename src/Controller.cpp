@@ -80,10 +80,12 @@ void Controller::loop()
     {
         LOG_I(TAG, "Msg from UART: " + String(received.c_str()));
 
-        // Check if the received data equals "help"
-        if (received == "help") 
+        std::string msg = xctrlProtocol.decode(received);
+        bool result = xctrlProtocol.processMsg(msg);
+
+        if (false == result) 
         {
-            xctrlProtocol.showHelp(); // Execute the showHelp() function
+            LOG_W(TAG, "Unspported protocol!!!");
         }
     }
     

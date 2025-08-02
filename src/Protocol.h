@@ -36,7 +36,7 @@ public:
 
     // Send data as a string packet
     // This method allows sending protocol-specific packets as strings.
-    virtual void sendData(std::string packet) = 0;
+    virtual void sendData(const std::string& packet) = 0;
 
     // Send data as a byte array
     // This method allows sending raw binary data.
@@ -53,6 +53,8 @@ public:
     // Show help information for the protocol
     // This method provides details about the protocol's usage and supported commands.
     virtual void showHelp() = 0;
+
+    virtual bool processMsg(const std::string& msg) = 0;
 };
 
 #endif // PROTOCOL_H
