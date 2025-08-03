@@ -11,9 +11,14 @@ class MicroModbus
 {
     public:
         // Callback types
-        using ReadCallback = std::function<int32_t(uint8_t *buffer, uint16_t count, int32_t timeout)>;
-        using WriteCallback = std::function<int32_t(const uint8_t *buffer, uint16_t count, int32_t timeout)>;
-        using TimeCallback = std::function<uint32_t()>;
+        using ReadCallback = std::function<int32_t(uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg)>;
+        using WriteCallback = std::function<int32_t(const uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg)>;
+
+        using ReadCoilsCallback = std::function<nmbs_error(uint16_t address, uint16_t quantity, nmbs_bitfield coils_out, uint8_t unit_id, void* arg)>;
+        using WriteMultipleCoilsCallback = std::function<nmbs_error(uint16_t address, uint16_t quantity, const nmbs_bitfield coils, uint8_t unit_id, void* arg)>;
+
+        using ReadHoldingRegistersCallback = std::function<nmbs_error(uint16_t address, uint16_t quantity, uint16_t* registers_out, uint8_t unit_id, void* arg)>;
+        using WriteMultipleRegistersCallback = std::function<nmbs_error(uint16_t address, uint16_t quantity, const uint16_t* registers, uint8_t unit_id, void* arg)>;
 
         // Modbus exception codes
         enum class ExceptionCode : uint8_t
@@ -36,7 +41,12 @@ class MicroModbus
         ~MicroModbus();
 
         // Configuration
-        void configureCallbacks(ReadCallback readCb, WriteCallback writeCb, TimeCallback timeCb);
+        void configureCallbacks(ReadCallback readCb, 
+                                WriteCallback writeCb, 
+                                ReadCoilsCallback readCoilsCb, 
+                                WriteMultipleCoilsCallback writeMultipleCoilsCb,
+                                ReadHoldingRegistersCallback readHoldingRegistersCb, 
+                                WriteMultipleRegistersCallback writeMultipleRegistersCb);     
 
         // Master operations
         ExceptionCode readHoldingRegisters(uint16_t startAddress, uint16_t quantity, uint16_t *output);
@@ -55,16 +65,28 @@ class MicroModbus
         nmbs_platform_conf m_platformConf;
 
         // Internal callback wrappers for serial read/write
-        static int32_t staticReadCallback(uint8_t *buf, uint16_t count, int32_t timeout, void *context);
-        static int32_t staticWriteCallback(const uint8_t *buf, uint16_t count, int32_t timeout, void *context);
+        static int32_t staticReadCallback(uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg);
+        static int32_t staticWriteCallback(const uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg);
 
         // Instance callbacks for serial read/write
         ReadCallback m_readCallback;
         WriteCallback m_writeCallback;
-        TimeCallback m_timeCallback;
 
-        // Internal callback wrappers for serial read/write
-        // static int32_t staticHandleReadCoilsCallback(uint8_t *buf, uint16_t count, int32_t timeout, void *context);
+        // Internal callback wrappers for handling read/write coils
+        static nmbs_error staticHandleReadCoilsCallback(uint16_t address, uint16_t quantity, nmbs_bitfield coils_out, uint8_t unit_id, void* arg);
+        static nmbs_error staticHandleWriteMultipleCoilsCallback(uint16_t address, uint16_t quantity, const nmbs_bitfield coils, uint8_t unit_id, void* arg);
+
+        // Instance callbacks for handling read/write coils
+        ReadCoilsCallback m_readCoilsCallback;
+        WriteMultipleCoilsCallback m_writeMultipleCoilsCallback;
+        
+        // Internal callback wrappers for handling read/write registers
+        static nmbs_error staticHandleReadHoldingRegistersCallback(uint16_t address, uint16_t quantity, uint16_t* registers_out, uint8_t unit_id, void* arg);
+        static nmbs_error staticHandleWriteMultipleRegistersCallback(uint16_t address, uint16_t quantity, const uint16_t* registers, uint8_t unit_id, void* arg);
+
+        // Instance callbacks for handling read/write registers
+        ReadHoldingRegistersCallback m_readHoldingRegistersCallback;
+        WriteMultipleRegistersCallback m_writeMultipleRegistersCallback;
 
         // Slave data handler
         std::function<ExceptionCode(uint8_t, uint16_t, uint16_t, uint16_t *)> m_slaveDataHandler;

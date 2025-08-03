@@ -17,10 +17,10 @@ MicroModbus::MicroModbus(uint8_t slaveAddress, bool isServer, bool isTcp) : m_is
 
     nmbs_callbacks callbacks;
     nmbs_callbacks_create(&callbacks);
-    // callbacks.read_coils = handle_read_coils;
-    // callbacks.write_multiple_coils = handle_write_multiple_coils;
-    // callbacks.read_holding_registers = handler_read_holding_registers;
-    // callbacks.write_multiple_registers = handle_write_multiple_registers;
+    callbacks.read_coils = staticHandleReadCoilsCallback;
+    callbacks.write_multiple_coils = staticHandleWriteMultipleCoilsCallback;
+    callbacks.read_holding_registers = staticHandleReadHoldingRegistersCallback;
+    callbacks.write_multiple_registers = staticHandleWriteMultipleRegistersCallback;
 
 
     // Modbus Server/Slave
@@ -73,11 +73,20 @@ MicroModbus::~MicroModbus()
     // Cleanup if needed
 }
 
-void MicroModbus::configureCallbacks(ReadCallback readCb, WriteCallback writeCb, TimeCallback timeCb)
+void MicroModbus::configureCallbacks(ReadCallback readCb, 
+    WriteCallback writeCb, 
+    ReadCoilsCallback readCoilsCb, 
+    WriteMultipleCoilsCallback writeMultipleCoilsCb,
+    ReadHoldingRegistersCallback readHoldingRegistersCb, 
+    WriteMultipleRegistersCallback writeMultipleRegistersCb)
 {
     m_readCallback = readCb;
     m_writeCallback = writeCb;
-    m_timeCallback = timeCb;
+
+    m_readCoilsCallback = readCoilsCb;
+    m_writeMultipleCoilsCallback = writeMultipleCoilsCb;
+    m_readHoldingRegistersCallback = readHoldingRegistersCb;    
+    m_writeMultipleRegistersCallback = writeMultipleRegistersCb;
 }
 
 MicroModbus::ExceptionCode MicroModbus::readHoldingRegisters(uint16_t startAddress, uint16_t quantity, uint16_t *output)
@@ -127,25 +136,25 @@ void MicroModbus::poll()
 }
 
 // Static callback wrappers
-int32_t MicroModbus::staticReadCallback(uint8_t *buf, uint16_t count, int32_t timeout, void *context)
+int32_t MicroModbus::staticReadCallback(uint8_t* buf, uint16_t count, int32_t byte_timeout_ms,void* arg)
 {
-    MicroModbus *instance = static_cast<MicroModbus *>(context);
+    MicroModbus *instance = static_cast<MicroModbus *>(arg);
     if (instance && instance->m_readCallback)
     {
-        return instance->m_readCallback(buf, count, timeout);
+        return instance->m_readCallback(buf, count, byte_timeout_ms, arg);
     }
-    return -1;
+    return -1; // or appropriate error
 }
 
-int32_t MicroModbus::staticWriteCallback(const uint8_t *buf, uint16_t count, int32_t timeout, void *context)
+int32_t MicroModbus::staticWriteCallback(const uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg)
 {
-    MicroModbus *instance = static_cast<MicroModbus *>(context);
+    MicroModbus *instance = static_cast<MicroModbus *>(arg);
     if (instance && instance->m_writeCallback)
     {
-        return instance->m_writeCallback(buf, count, timeout);
+        return instance->m_writeCallback(buf, count, byte_timeout_ms, arg);
     }
-    return -1;
-}
+    return -1; // or appropriate error
+}   
 
 // Error conversion
 MicroModbus::ExceptionCode MicroModbus::convertError(nmbs_error error)
@@ -156,4 +165,48 @@ MicroModbus::ExceptionCode MicroModbus::convertError(nmbs_error error)
 nmbs_error MicroModbus::convertException(ExceptionCode code)
 {
     return static_cast<nmbs_error>(code);
+}
+
+nmbs_error MicroModbus::staticHandleReadCoilsCallback(uint16_t address, uint16_t quantity, nmbs_bitfield coils_out, uint8_t unit_id, void* arg)
+{
+    MicroModbus *instance = static_cast<MicroModbus *>(arg);
+    if (instance && instance->m_readCoilsCallback)
+    {
+        return instance->m_readCoilsCallback(address, quantity, coils_out, unit_id, arg);
+    }
+    
+    return NMBS_ERROR_INVALID_ARGUMENT; // or appropriate error
+}
+
+nmbs_error MicroModbus::staticHandleWriteMultipleCoilsCallback(uint16_t address, uint16_t quantity, const nmbs_bitfield coils, uint8_t unit_id, void* arg)
+{
+    MicroModbus *instance = static_cast<MicroModbus *>(arg);
+    if (instance && instance->m_writeMultipleCoilsCallback)
+    {
+        return instance->m_writeMultipleCoilsCallback(address, quantity, coils, unit_id, arg);
+    }
+    
+    return NMBS_ERROR_INVALID_ARGUMENT; // or appropriate error
+}
+
+nmbs_error MicroModbus::staticHandleReadHoldingRegistersCallback(uint16_t address, uint16_t quantity, uint16_t* registers_out, uint8_t unit_id, void* arg)
+{
+    MicroModbus *instance = static_cast<MicroModbus *>(arg);
+    if (instance && instance->m_readHoldingRegistersCallback)
+    {
+        return instance->m_readHoldingRegistersCallback(address, quantity, registers_out, unit_id, arg);
+    }
+    
+    return NMBS_ERROR_INVALID_ARGUMENT; // or appropriate error
+}
+
+nmbs_error MicroModbus::staticHandleWriteMultipleRegistersCallback(uint16_t address, uint16_t quantity, const uint16_t* registers, uint8_t unit_id, void* arg)
+{
+    MicroModbus *instance = static_cast<MicroModbus *>(arg);
+    if (instance && instance->m_writeMultipleRegistersCallback)
+    {
+        return instance->m_writeMultipleRegistersCallback(address, quantity, registers, unit_id, arg);
+    }
+    
+    return NMBS_ERROR_INVALID_ARGUMENT; // or appropriate error
 }
