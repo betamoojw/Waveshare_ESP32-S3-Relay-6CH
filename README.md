@@ -2,7 +2,7 @@
 
 ## Description
 
-This is a project template to create microcontroller apps with automatized firmware builds for [esp32](https://www.espressif.com/en/products/socs/esp32), [esp32s2](https://www.espressif.com/en/products/socs/esp32-s2) and [esp32s3](https://www.espressif.com/en/products/socs/esp32-s3) microcontroller boards. It uses for that [GitHub Actions](https://github.com/features/actions) and [platformio](https://platformio.org/). Use this repository as a template for your own esp32 projects.
+This is a project...
 
 ## Requirements
 
@@ -39,27 +39,6 @@ This is required to publish several firmware names in the github artifacts of a 
 4. Comment your new change in the [CHANGELOG.md](CHANGELOG.md) file
 5. Push your changes
 
-```sh
-git add .
-```
-
-```sh
-git commit -am "my app"
-```
-
-```sh
-git push -u origin main
-```
-
-5. Create a new tag to trigger a release, e.g. for v1.0.0
-
-```sh
-git tag v1.0.0
-```
-
-```sh
-git push origin v1.0.0
-```
 
 6. You can find your firmwares under `Releases` after the CI build finished
 
@@ -81,26 +60,9 @@ Update the [CHANGELOG.md](CHANGELOG.md) file before you are creating a new relea
 
 Buy on AliExpress (affiliate links) ...
 
-- ESP32
-  - [LILYGO T-Beam](https://s.click.aliexpress.com/e/_DBzslDV) with LoRA
-  - lolin32
-  - lolin D32 pro
-- ESP32 S2
 - ESP32 S3
-  - [LILYGO T-Display S3](https://s.click.aliexpress.com/e/_DBmOMkn)
-  - [LILYGO T-Display-S3 AMOLED](https://s.click.aliexpress.com/e/_DmboYpZ)
-  - [LILYGO T-Display-S3 Touch](https://s.click.aliexpress.com/e/_DCBgPlV)
-  - [LILYGO T-Display S3 Long](https://s.click.aliexpress.com/e/_Dl6UVMx))
-  - [LilyGo T-Watch S3](https://s.click.aliexpress.com/e/_DEZVvH1)
-  - [LilyGo T-CameraPlus ESP32-S3](https://s.click.aliexpress.com/e/_DkytBeT)
-  - [LilyGo T-RGB](https://s.click.aliexpress.com/e/_Dem6i0b)
-  - [LilyGo T-Deck](https://s.click.aliexpress.com/e/_DBPnZmL)
-  - [LilyGo T-Deck Plus](https://s.click.aliexpress.com/e/_DDeskaP)
+  - [ESP32-S3-Relay-6CH](https://www.waveshare.com/wiki/ESP32-S3-Relay-6CH)
 
-- ESP32 C6 with WiFi 6 and BT-5 LE
-  - [NanoESP32-C6](https://s.click.aliexpress.com/e/_ooBtUih) with 16MB flash
-  - [ESP32-C6](https://s.click.aliexpress.com/e/_DeLjVMb) with 4MB flash and W2812 RGB LED
-  - [LILYGO T-QT C6](https://github.com/mcuw/esp32-t-qt-c6-sdk) with 4 MB flash, touch display, 6-Axis Sensor
 
 ## Disclaimer
 
