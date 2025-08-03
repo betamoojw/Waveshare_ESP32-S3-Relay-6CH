@@ -37,6 +37,9 @@ public:
     // Set baud rate
     void setBaudRate(RS485BaudRate baudRate);
 
+    // Set timeout
+    void setTimeout(int timeout_ms);
+
 private:
     // Private constructor for Singleton
     UARTCommunication(int uartPort = 1, RS485BaudRate baudRate = RS485BaudRate::BAUD_9600, int rxdPin = RXD1, int txdPin = TXD1);

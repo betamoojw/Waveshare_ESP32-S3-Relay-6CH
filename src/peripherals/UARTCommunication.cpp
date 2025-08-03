@@ -116,3 +116,13 @@ void UARTCommunication::setBaudRate(RS485BaudRate baudRate)
         hwSerial->updateBaudRate(static_cast<int>(baudRate));
     }
 }
+
+
+// Set timeout
+void UARTCommunication::setTimeout(int timeout_ms) 
+{
+    if (hwSerial) 
+    {
+        hwSerial->setTimeout(timeout_ms);
+    }
+}
