@@ -48,12 +48,18 @@ class MicroModbus
                                 ReadHoldingRegistersCallback readHoldingRegistersCb, 
                                 WriteMultipleRegistersCallback writeMultipleRegistersCb);     
 
-        // Master operations
-        ExceptionCode readHoldingRegisters(uint16_t startAddress, uint16_t quantity, uint16_t *output);
+        // Client/Master operations
+        void setDestinationRtuAddress(uint8_t address);
+        ExceptionCode readCoils(uint16_t address, uint16_t quantity, nmbs_bitfield coils_out);
+        ExceptionCode readDiscreteInputs(uint16_t address, uint16_t quantity, nmbs_bitfield inputs_out);
+        ExceptionCode readHoldingRegisters(uint16_t address, uint16_t quantity, uint16_t* registers_out);
+        ExceptionCode readInputRegisters(uint16_t address, uint16_t quantity, uint16_t* registers_out);
+        ExceptionCode writeSingleCoil(uint16_t address, bool value);
         ExceptionCode writeSingleRegister(uint16_t address, uint16_t value);
-        ExceptionCode writeMultipleRegisters(uint16_t startAddress, uint16_t quantity, const uint16_t *values);
+        ExceptionCode writeMultipleCoils(uint16_t address, uint16_t quantity, const nmbs_bitfield coils);
+        ExceptionCode writeMultipleRegisters(uint16_t address, uint16_t quantity, const uint16_t* registers);
 
-        // Slave operations
+        // Server/Slave operations
         void setSlaveDataHandler(
             std::function<ExceptionCode(uint8_t function, uint16_t address, uint16_t quantity, uint16_t *data)> handler);
         void poll();
@@ -96,7 +102,7 @@ class MicroModbus
         static nmbs_error convertException(ExceptionCode code);
 
         // onError handler
-        void onError()
+        void onError();
 };
 
 #endif // MICROMODBUS_H

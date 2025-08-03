@@ -89,9 +89,36 @@ void MicroModbus::configureCallbacks(ReadCallback readCb,
     m_writeMultipleRegistersCallback = writeMultipleRegistersCb;
 }
 
-MicroModbus::ExceptionCode MicroModbus::readHoldingRegisters(uint16_t startAddress, uint16_t quantity, uint16_t *output)
+void MicroModbus::setDestinationRtuAddress(uint8_t address)
 {
-    nmbs_error err = nmbs_read_holding_registers(&m_nmbs, startAddress, quantity, output);
+    nmbs_set_destination_rtu_address(&m_nmbs, address);
+}
+
+MicroModbus::ExceptionCode MicroModbus::readCoils(uint16_t address, uint16_t quantity, nmbs_bitfield coils_out)
+{
+    nmbs_error err = nmbs_read_coils(&m_nmbs, address, quantity, coils_out);
+    return convertError(err);
+}
+MicroModbus::ExceptionCode MicroModbus::readDiscreteInputs(uint16_t address, uint16_t quantity, nmbs_bitfield inputs_out)
+{
+    nmbs_error err = nmbs_read_discrete_inputs(&m_nmbs, address, quantity, inputs_out);
+    return convertError(err);
+}
+MicroModbus::ExceptionCode MicroModbus::readHoldingRegisters(uint16_t address, uint16_t quantity, uint16_t* registers_out)
+{
+    nmbs_error err = nmbs_read_holding_registers(&m_nmbs, address, quantity, registers_out);
+    return convertError(err);
+}
+
+MicroModbus::ExceptionCode MicroModbus::readInputRegisters(uint16_t address, uint16_t quantity, uint16_t* registers_out)
+{
+    nmbs_error err = nmbs_read_input_registers(&m_nmbs, address, quantity, registers_out);
+    return convertError(err);
+}
+
+MicroModbus::ExceptionCode MicroModbus::writeSingleCoil(uint16_t address, bool value)
+{
+    nmbs_error err = nmbs_write_single_coil(&m_nmbs, address, value);
     return convertError(err);
 }
 
@@ -100,10 +127,14 @@ MicroModbus::ExceptionCode MicroModbus::writeSingleRegister(uint16_t address, ui
     nmbs_error err = nmbs_write_single_register(&m_nmbs, address, value);
     return convertError(err);
 }
-
-MicroModbus::ExceptionCode MicroModbus::writeMultipleRegisters(uint16_t startAddress, uint16_t quantity, const uint16_t *values)
+MicroModbus::ExceptionCode MicroModbus::writeMultipleCoils(uint16_t address, uint16_t quantity, const nmbs_bitfield coils)
 {
-    nmbs_error err = nmbs_write_multiple_registers(&m_nmbs, startAddress, quantity, values);
+    nmbs_error err = nmbs_write_multiple_coils(&m_nmbs, address, quantity, coils);
+    return convertError(err);
+}
+MicroModbus::ExceptionCode MicroModbus::writeMultipleRegisters(uint16_t address, uint16_t quantity, const uint16_t* registers)
+{
+    nmbs_error err = nmbs_write_multiple_registers(&m_nmbs, address, quantity, registers);
     return convertError(err);
 }
 
@@ -214,7 +245,8 @@ nmbs_error MicroModbus::staticHandleWriteMultipleRegistersCallback(uint16_t addr
 void MicroModbus::onError()
 {
     // Handle error, e.g., blink an LED or log
-    while (true) {
+    while (true)
+    {
         // placeholder for error handling, e.g., blink an LED
     }
 }
