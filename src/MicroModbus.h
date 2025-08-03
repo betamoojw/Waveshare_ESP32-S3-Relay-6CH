@@ -94,6 +94,9 @@ class MicroModbus
         // Convert between error types
         static ExceptionCode convertError(nmbs_error error);
         static nmbs_error convertException(ExceptionCode code);
+
+        // onError handler
+        void onError()
 };
 
 #endif // MICROMODBUS_H

@@ -39,7 +39,7 @@ MicroModbus::MicroModbus(uint8_t slaveAddress, bool isServer, bool isTcp) : m_is
             nmbs_error err = nmbs_server_create(&m_nmbs, slaveAddress, &m_platformConf, &callbacks);
             if (err != NMBS_ERROR_NONE)
             {
-                // onError();
+                onError();
             }
         }
     }
@@ -59,7 +59,7 @@ MicroModbus::MicroModbus(uint8_t slaveAddress, bool isServer, bool isTcp) : m_is
             nmbs_error err = nmbs_client_create(&m_nmbs, &m_platformConf);;
             if (err != NMBS_ERROR_NONE)
             {
-                // onError();
+                onError();
             }
         }
     }
@@ -125,7 +125,7 @@ void MicroModbus::poll()
         if (err == NMBS_ERROR_TRANSPORT)
         {
             // Handle transport error
-            // onError();
+            onError();
         }
     }
     // Modbus Client/Master
@@ -209,4 +209,12 @@ nmbs_error MicroModbus::staticHandleWriteMultipleRegistersCallback(uint16_t addr
     }
     
     return NMBS_ERROR_INVALID_ARGUMENT; // or appropriate error
+}
+
+void MicroModbus::onError()
+{
+    // Handle error, e.g., blink an LED or log
+    while (true) {
+        // placeholder for error handling, e.g., blink an LED
+    }
 }
