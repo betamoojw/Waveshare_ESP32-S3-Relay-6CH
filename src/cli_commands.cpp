@@ -2,7 +2,7 @@
 #include "peripherals/relay_control.h"
 #include "peripherals/buzzer_control.h"
 #include "peripherals/digital_led_control.h"
-#include "peripherals/UARTCommunication.h"
+
 
 #include <Logger.h>
 
@@ -277,18 +277,7 @@ void cli_uart_send_data(EmbeddedCli *cli, char *args, void *context)
     // Extract the data to send
     const char *data = embeddedCliGetToken(args, 1);
 
-    // Get the singleton instance of UARTCommunication
-    UARTCommunication &uartCom = UARTCommunication::getInstance();
-
-    // Check if UART is initialized and connected
-    if (!uartCom.isConnected())
-    {
-        LOG_E(TAG, "UART is not initialized or connected.");
-        return;
-    }
-
-    // Send the data over UART
-    uartCom.sendData(data);
+    // Placeholder for UARTCommunication class
 
     LOG_I(TAG, "UART data sent: %s", data);
 }

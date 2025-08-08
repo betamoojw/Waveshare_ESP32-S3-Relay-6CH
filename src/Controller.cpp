@@ -2,8 +2,6 @@
 #include "cli_interface.h"
 #include "peripherals/btn_interface.h"
 #include "peripherals/relay_control.h"
-#include "peripherals/UARTCommunication.h"
-#include "XctrlProtocol.h"
 #include "peripherals/board_def.h"
 
 
@@ -23,30 +21,8 @@ void Controller::setup()
     String title = "Relay Controller";
     LOG_I(TAG, title + " booting start");
 
-
     // Initialize last ping time
     lastPingTime = millis();
-
-
-
-    {
-        // Initialize UART communication
-        UARTCommunication& uartComm = UARTCommunication::getInstance();
-        uartComm.setBaudRate(UARTCommunication::RS485BaudRate::BAUD_115200);
-        uartComm.initialize();
-
-        // Send a test message
-        uartComm.sendData("UART initialized on Serial1 with TXD1 and RXD1.\n");
-
-        // Connect the protocol to the UART communication interface
-        xctrlProtocol.connect(&uartComm);
-
-        // Initialize the protocol
-        xctrlProtocol.initialize();
-
-        // Wait for a second
-        delay(1000);
-    }
 
     // Get the singleton instance of BtnInterface
     BtnInterface& btnInterface = BtnInterface::getInstance();
@@ -71,24 +47,6 @@ void Controller::loop()
     // For example, check for button presses, handle UART communication, etc.
 
     cli_task();
-
-    UARTCommunication& uartComm = UARTCommunication::getInstance();
-    std::string received = uartComm.receiveData();
-
-    // If data is received, print it to the SERIAL console
-    if (!received.empty()) 
-    {
-        LOG_I(TAG, "Msg from UART: " + String(received.c_str()));
-
-        std::string msg = xctrlProtocol.decode(received);
-        bool result = xctrlProtocol.processMsg(msg);
-
-        if (false == result) 
-        {
-            LOG_W(TAG, "Unspported protocol!!!");
-        }
-    }
-    
 
     // Get the singleton instance of BtnInterface
     BtnInterface& btnInterface = BtnInterface::getInstance();
