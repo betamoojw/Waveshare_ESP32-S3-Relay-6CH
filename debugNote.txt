@@ -1,0 +1,51 @@
+Rebooting...
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40379fba
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x1188
+load:0x403c8700,len:0x4
+load:0x403c8704,len:0xbf0
+load:0x403cb700,len:0x30e4
+entry 0x403c88ac
+00:00:00 I-[Controller]: Relay Controller booting start
+Guru Meditation Error: Core  1 panic'ed (LoadProhibited). Exception was unhandled.
+
+Core  1 register dump:
+PC      : 0x400555cd  PS      : 0x00060530  A0      : 0x82007fc9  A1      : 0x3fca6ea0
+A2      : 0x3fc99378  A3      : 0x00000000  A4      : 0x000000ff  A5      : 0x0000ff00
+A6      : 0x00ff0000  A7      : 0xff000000  A8      : 0x00000000  A9      : 0x3fca6e50
+A10     : 0x3fc99378  A11     : 0x00000000  A12     : 0x00000001  A13     : 0xffffffff
+A14     : 0x3fca22d4  A15     : 0x00000000  SAR     : 0x0000000e  EXCCAUSE: 0x0000001c
+EXCVADDR: 0x00000000  LBEG    : 0x400555cd  LEND    : 0x400555e1  LCOUNT  : 0xffffffff
+
+
+Backtrace: 0x400555ca:0x3fca6ea0 0x42007fc6:0x3fca6eb0 0x4200633b:0x3fca6ed0 0x42007ece:0x3fca6f40 0x4200edc3:0x3fca6f60 0x4037d7ce:0x3fca6f80
+
+
+
+
+ELF file SHA256: a3b7d0ad2
+
+Rebooting...
+
+
+PS G:\lvgl.io\HW_ESP32-S3-Relay-6CH\Waveshare_ESP32-S3-Relay-6CH\.pio\build\ws_esp32-s3-relay-6ch> addr2line -pfiaC -e .\firmware_ws_esp32-s3-relay-6ch_None.elf 0x400555ca:0x3fca6ea0 0x42007fc6:0x3fca6eb0 0x4200633b:0x3fca6ed0 0x42007ece:0x3fca6f40 0x4200edc3:0x3fca6f60 0x4037d7ce:0x3fca6f80
+0x400555ca: ?? ??:0
+0x42007fc6: Modbus::setSerialPort(char const*)  G:\lvgl.io\HW_ESP32-S3-Relay-6CH\Waveshare_ESP32-S3-Relay-6CH/src/modbus/modbus.cpp:58
+0x4200633b: Controller::setup()  G:\lvgl.io\HW_ESP32-S3-Relay-6CH\Waveshare_ESP32-S3-Relay-6CH/src/Controller.cpp:52
+0x42007ece: setup()  G:\lvgl.io\HW_ESP32-S3-Relay-6CH\Waveshare_ESP32-S3-Relay-6CH/src/main.cpp:6
+0x4200edc3: loopTask(void*)  C:/Users/Maxwell_tech/.platformio/packages/framework-arduinoespressif32@src-575aa31f3d87ea4051f9d8f460cedaea/cores/esp32/main.cpp:59
+0x4037d7ce: vPortTaskWrapper  /home/runner/work/esp32-arduino-lib-builder/esp32-arduino-lib-builder/esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/port.c:139
+PS G:\lvgl.io\HW_ESP32-S3-Relay-6CH\Waveshare_ESP32-S3-Relay-6CH\.pio\build\ws_esp32-s3-relay-6ch>
+
+
+
+ESP32-S3进入下载模式需通过组合按键操作和硬件配置实现，具体步骤如下：
+
+按键操作
+‌按住BOOT按钮（或标记为IO0的引脚）‌：部分开发板可能需通过硬件控制GPIO0引脚。
+‌按下并松开复位按钮（EN）‌：在按住BOOT按钮的同时按下复位键，随后松开复位键。
+‌保持BOOT按钮按下‌：松开复位键后，保持BOOT按钮处于按下状态约5秒，设备进入下载模式。
