@@ -52,6 +52,26 @@ void Modbus::setSerialWrite(int32_t (*serialWrite)(const char port[], const uint
     m_serialWrite = serialWrite;
 }
 
+int32_t Modbus::readSerial(uint8_t *buf, uint16_t count, int32_t byteTimeoutMs, void *arg)
+{
+    Modbus *modbus = static_cast<Modbus *>(arg);
+    if (modbus->m_serialRead)
+    {
+        return modbus->m_serialRead(modbus->m_port, buf, count, byteTimeoutMs);
+    }
+    return 0;
+}
+
+int32_t Modbus::writeSerial(const uint8_t *buf, uint16_t count, int32_t byteTimeoutMs, void *arg)
+{
+    Modbus *modbus = static_cast<Modbus *>(arg);
+    if (modbus->m_serialWrite)
+    {
+        return modbus->m_serialWrite(modbus->m_port, buf, count, byteTimeoutMs);
+    }
+    return 0;
+}
+
 // Not supported. Cause the reboot issue if used.
 void Modbus::setSerialPort(const char port[])
 {
@@ -143,18 +163,18 @@ bool Modbus::createServerRTU(uint8_t address)
     nmbs_callbacks callbacks;
     nmbs_callbacks_create(&callbacks);
     // Set callbacks ...
-    callbacks.read_coils =  ModbusServer::handleReadCoilsStatic;
-    callbacks.read_discrete_inputs = m_server->handleReadDiscreteInputsStatic;
-	callbacks.read_holding_registers =  m_server->handleReadHoldingRegistersStatic;
-	callbacks.read_input_registers = m_server->handleReadInputRegistersStatic;
-	callbacks.write_single_coil = m_server->handleWriteSingleCoilStatic;
-	callbacks.write_single_register = m_server->handleWriteSingleRegisterStatic;
-	callbacks.write_multiple_coils = m_server->handleWriteMultipleCoilsStatic;
-	callbacks.write_multiple_registers = m_server->handleWriteMultipleRegistersStatic;
-	callbacks.read_file_record = m_server->handleReadFileRecordStatic;
-	callbacks.write_file_record = m_server->handleWriteFileRecordStatic;
-	// callbacks.read_device_identification_map = m_server->handleReadDeviceIdentificationMapStatic;
-	// callbacks.read_device_identification = m_server->handleReadDeviceIdentificationStatic;
+    callbacks.read_coils = readCoils;
+    // callbacks.read_discrete_inputs = ;
+	// callbacks.read_holding_registers =  ;
+	// callbacks.read_input_registers = ;
+	// callbacks.write_single_coil = ;
+	// callbacks.write_single_register =;
+	// callbacks.write_multiple_coils =;
+	// callbacks.write_multiple_registers =;
+	// callbacks.read_file_record =;
+	// callbacks.write_file_record =;
+	// callbacks.read_device_identification_map =;
+	// callbacks.read_device_identification =;
 
     // Create Modbus server
     nmbs_error err = nmbs_server_create(&m_nmbsServer, address, &platformConf, &callbacks);
@@ -179,58 +199,20 @@ bool Modbus::serverPolling()
     return m_server->polling();
 }
 
-bool Modbus::setDigitalOutputs(const uint8_t outputs[], uint16_t address, uint16_t quantity)
+void Modbus::setReadCoils(nmbs_error (*readCoils)(uint16_t, uint16_t, nmbs_bitfield, uint8_t))
 {
-    return m_server->setDigitalOutputs(outputs, address, quantity);
-}
-
-bool Modbus::setDigitalInputs(const uint8_t inputs[], uint16_t address, uint16_t quantity)
-{
-    return m_server->setDigitalInputs(inputs, address, quantity);
-}
-
-bool Modbus::setAnalogInputs(const uint16_t inputs[], uint16_t address, uint16_t quantity)
-{
-    return m_server->setAnalogInputs(inputs, address, quantity);
-}
-
-uint16_t * Modbus::getAnalogInputs()
-{
-    return m_server->getAnalogInputs();
-}
-
-bool Modbus:: getParametersAtServer(uint16_t parameters[], uint16_t address, uint16_t quantity)
-{
-    return m_server->getParametersAtServer(parameters, address, quantity);
-}
-
-bool Modbus:: setParametersOnServer(const uint16_t parameters[], uint16_t address, uint16_t quantity)
-{
-    return m_server->setParametersOnServer(parameters, address, quantity);
-}
-
-uint16_t * Modbus::getParametersArray()
-{
-    return m_server->getParametersOnServer();
+    m_readCoils = readCoils;
 }
 
 
-int32_t Modbus::readSerial(uint8_t *buf, uint16_t count, int32_t byteTimeoutMs, void *arg)
+nmbs_error Modbus::readCoils(uint16_t address, uint16_t quantity, nmbs_bitfield coils_out, uint8_t unit_id, void *arg)
 {
     Modbus *modbus = static_cast<Modbus *>(arg);
-    if (modbus->m_serialRead)
+    if (modbus->m_readCoils)
     {
-        return modbus->m_serialRead(modbus->m_port, buf, count, byteTimeoutMs);
+        return modbus->m_readCoils(address, quantity, coils_out, unit_id);
     }
-    return 0;
+    return NMBS_ERROR_NONE;
 }
 
-int32_t Modbus::writeSerial(const uint8_t *buf, uint16_t count, int32_t byteTimeoutMs, void *arg)
-{
-    Modbus *modbus = static_cast<Modbus *>(arg);
-    if (modbus->m_serialWrite)
-    {
-        return modbus->m_serialWrite(modbus->m_port, buf, count, byteTimeoutMs);
-    }
-    return 0;
-}
+

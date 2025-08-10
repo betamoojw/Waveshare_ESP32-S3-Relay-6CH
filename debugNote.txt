@@ -49,3 +49,8 @@ ESP32-S3进入下载模式需通过组合按键操作和硬件配置实现，具
 ‌按住BOOT按钮（或标记为IO0的引脚）‌：部分开发板可能需通过硬件控制GPIO0引脚。
 ‌按下并松开复位按钮（EN）‌：在按住BOOT按钮的同时按下复位键，随后松开复位键。
 ‌保持BOOT按钮按下‌：松开复位键后，保持BOOT按钮处于按下状态约5秒，设备进入下载模式。
+
+
+
+'nmbs_error (*)(uint16_t, uint16_t, uint8_t*, uint8_t, void*)' 
+'nmbs_error (*)(uint16_t, uint16_t, uint8_t*, uint8_t)'

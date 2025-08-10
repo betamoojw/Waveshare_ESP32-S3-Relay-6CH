@@ -37,18 +37,17 @@ class Modbus
         
         // Server functions
         bool serverPolling();
-        bool setDigitalOutputs(const uint8_t outputs[], uint16_t address, uint16_t quantity);
-        bool setDigitalInputs(const uint8_t inputs[], uint16_t address, uint16_t quantity);
-        bool setAnalogInputs(const uint16_t inputs[], uint16_t address, uint16_t quantity);
-        uint16_t *getAnalogInputs();
-        bool getParametersAtServer(uint16_t parameters[], uint16_t address, uint16_t quantity);
-        bool setParametersOnServer(const uint16_t parameters[], uint16_t address, uint16_t quantity);
-        uint16_t *getParametersArray();
+        // Set callback functions used by server
+        void setReadCoils(nmbs_error (*readCoils)(uint16_t, uint16_t, nmbs_bitfield, uint8_t));
 
     private:
         // Serial read and write function pointers
         int32_t (*m_serialRead)(const char port[], uint8_t *, uint16_t, int32_t);
         int32_t (*m_serialWrite)(const char port[], const uint8_t *, uint16_t, int32_t);
+
+        //Callback functions called by server
+        nmbs_error (*m_readCoils)(uint16_t, uint16_t, nmbs_bitfield, uint8_t);
+        static nmbs_error readCoils(uint16_t address, uint16_t quantity, nmbs_bitfield coils_out, uint8_t unit_id, void *arg);
 
         // Serial port
         char m_port[20];
