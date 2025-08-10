@@ -9,7 +9,7 @@ int main() {
     modbus.setSerialWrite(mySerialWriteFunction);
 
     // Set serial port
-    modbus.setSerialPort("COM1");
+    modbus.setSerialPort("COM1");  // Not supported. Cause the reboot issue if used.
 
     // Create Modbus client in RTU mode
     if (!modbus.createClientRTU(1)) {
@@ -52,6 +52,7 @@ void Modbus::setSerialWrite(int32_t (*serialWrite)(const char port[], const uint
     m_serialWrite = serialWrite;
 }
 
+// Not supported. Cause the reboot issue if used.
 void Modbus::setSerialPort(const char port[])
 {
     strcpy(m_port, port);

@@ -19,7 +19,7 @@ class Modbus
         void setSerialWrite(int32_t (*serialWrite)(const char port[], const uint8_t *, uint16_t, int32_t));
 
         // Set serial port shared by both Modbus client and server
-        void setSerialPort(const char port[]);
+        void setSerialPort(const char port[]);  // Not supported. Cause the reboot issue if used.
 
         // Create Modbus client in RTU mode
         bool createClientRTU(uint8_t address);
