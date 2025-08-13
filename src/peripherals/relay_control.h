@@ -29,6 +29,7 @@ public:
     RelayControl(const RelayControl&) = delete;
     RelayControl& operator=(const RelayControl&) = delete;
 
+    void loop(void);
     inline uint8_t getChannelCount() const { return RELAY_CHANNEL_COUNT; }
     void setChannel(uint8_t channel, bool state);
     bool getChannel(uint8_t channel);
@@ -47,6 +48,7 @@ private:
     void initRelays();
 
     Relay relays[RELAY_CHANNEL_COUNT];
+    const char *TAG = "Relay-Ctrl";
 };
 
 #endif

@@ -2,6 +2,8 @@
 #include "cli_interface.h"
 #include "peripherals/btn_interface.h"
 #include "peripherals/relay_control.h"
+#include "peripherals/buzzer_control.h"
+#include "peripherals/digital_led_control.h"
 #include "peripherals/board_def.h"
 #include "modbus/modbus.h"
 
@@ -101,19 +103,45 @@ void Controller::loop()
     // }
 
     {
-        const uint8_t digital_outputs = random(0, 1);
+        uint8_t digital_outputs = 1;
 	    modbus_server_set_digital_outputs(&digital_outputs, 0, 1);
+	    modbus_server_set_digital_outputs(&digital_outputs, 1, 1);
+        modbus_server_set_digital_outputs(&digital_outputs, 2, 1);
 
-        std::vector<uint16_t> params = {40, 50, 60, 70};
-        uint16_t address = 48;
+        std::vector<uint16_t> params = {0, 0, 0, 0, 0, 0, 0, 0};
         uint16_t quantity = params.size();
+        String tempStr = "";
+        for (uint16_t i = 0; i < quantity; i++)
+        {         
+            params[i] = random(0, 255);
+            if (i < quantity - 1)
+            {
+                tempStr += String(params[i]) + ",";
+            }
+            else
+            {
+                tempStr += String(params[i]);
+            }
+        }
+        LOG_I(TAG, "Set holding Register: " + tempStr);
 
         // Call function with vector's data
+        uint16_t address = 16;
         modbus_server_set_parameters(params.data(), address, quantity);
-        
+
         modbus_server_polling();
     }
 
+    {
+        RelayControl& relayCtrl = RelayControl::getInstance();
+        relayCtrl.loop();
+
+        DigitalLedControl& ledControl = DigitalLedControl::getInstance();
+        ledControl.loop();
+
+        BuzzerControl& buzzer = BuzzerControl::getInstance();
+        buzzer.loop();
+    }
 
     // Get the singleton instance of BtnInterface
     BtnInterface& btnInterface = BtnInterface::getInstance();

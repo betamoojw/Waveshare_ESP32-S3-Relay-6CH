@@ -1,5 +1,7 @@
 #include <Arduino.h>
+#include <Logger.h>
 #include "buzzer_control.h"
+#include "../modbus/modbus.h"
 
 // Static method to get the singleton instance
 BuzzerControl& BuzzerControl::getInstance() 
@@ -34,4 +36,34 @@ void BuzzerControl::playTone(uint8_t tone)
     delay(noteDuration);
     ledcWriteTone(GPIO_PIN_Buzzer, 0); // Stop tone
     delay(50);                       // short pause between notes
+}
+
+void BuzzerControl::loop(void)
+{
+    std::vector<uint16_t> params = {0xFFFF};
+    uint16_t quantity = params.size();
+    uint16_t address = 56;
+
+    modbus_server_get_parameters(params.data(), address, quantity);
+
+    if (params[0] < 0)
+    {
+        params[0] = 0;
+    }
+    else if (params[0] > 8)
+    {
+        params[0] = 8;
+    }
+    else
+    {
+        // Do nothing here
+    }
+    String tempStr = String(params[0]);
+    
+    if (0 != params[0])
+    {
+        playTone(params[0]);
+    }
+
+    LOG_I(TAG, "Get holding Register for led: " + tempStr);
 }

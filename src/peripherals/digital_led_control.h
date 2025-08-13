@@ -17,6 +17,7 @@ public:
     DigitalLedControl(const DigitalLedControl&) = delete;
     DigitalLedControl& operator=(const DigitalLedControl&) = delete;
 
+    void loop(void);
     void setColor(uint8_t red, uint8_t green, uint8_t blue);
     void setColor(uint32_t color);
     void setBrightness(uint8_t brightness);
@@ -40,6 +41,7 @@ private:
     CRGB leds[NUM_LEDS];  // LED array
     uint8_t brightness;   // LED brightness
     uint32_t color;       // LED color stored as a 32-bit integer
+    const char *TAG = "LED-Ctrl";
 };
 
 #endif

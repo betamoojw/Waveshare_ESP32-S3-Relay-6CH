@@ -1,6 +1,7 @@
 #include <Arduino.h>
+#include <Logger.h>
 #include "digital_led_control.h"
-
+#include "../modbus/modbus.h"
 
 // Static method to get the singleton instance
 DigitalLedControl& DigitalLedControl::getInstance() 
@@ -24,6 +25,55 @@ void DigitalLedControl::initLeds()
     FastLED.setBrightness(brightness); // Set default brightness
     turnOff(); // Ensure all LEDs are off initially
     show();    // Update the LED state
+}
+
+void DigitalLedControl::loop(void)
+{
+    std::vector<uint16_t> params = {0, 0, 0, 0};
+    uint16_t quantity = params.size();
+    String tempStr = "";
+    uint16_t address = 48;
+
+    modbus_server_get_parameters(params.data(), address, quantity);
+    for (uint16_t i = 0; i < quantity; i++)
+    {   
+        if (i < (quantity - 1))
+        {
+            tempStr += String(params[i]) + ",";
+        }
+        else
+        {
+            tempStr += String(params[i]);
+        }
+
+        if (params[i] < 0)
+        {
+            params[i] = 0;
+        }
+        else if (params[i] > 255)
+        {
+            params[i] = 255;
+        }
+        else
+        {
+            // Do nothing here
+        }
+        
+    }
+    uint8_t red = params[0];
+    uint8_t green = params[1];
+    uint8_t blue = params[2];
+    uint8_t brightness = params[3];
+
+    if (((0 != red) || (0 != green) || (0 != blue)) && (0 == brightness))
+    {
+        brightness = 64;
+    }
+
+    setColor(red, green, blue);
+    setBrightness(brightness);
+
+    LOG_I(TAG, "Get holding Register for led: " + tempStr);
 }
 
 // Set the color of all LEDs using RGB values
