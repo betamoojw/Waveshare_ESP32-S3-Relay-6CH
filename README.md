@@ -1,5 +1,39 @@
 # ESP32 project template
 
+## Modbus RTU Protocol V1
+
+### Function Code Introduction
+Function Code (hex) ------------- Description	-------------------------- Note
+0x03	                            Read holding register	                 
+0x06	                            Write single register	                 
+0x10                              Write Multiple registers
+
+### Register Address Introduction
+Address (Decimal) -- Address storage content -------------------------- Permission ------------- Modbus Function Code
+                     0x0000: relay off
+32 ~ 37              0x0001: relay on                                   Read/Write               0x03, 0x06, 0x10
+                     0x0002: relay toggle
+
+48                   0x~~FF: digital led red color                      Read/Write               0x03, 0x06, 0x10
+49                   0x~~FF: digital led green color                    Read/Write               0x03, 0x06, 0x10
+50                   0x~~FF: digital led blue color                     Read/Write               0x03, 0x06, 0x10
+51                   0x~~FF: digital led brightness                     Read/Write               0x03, 0x06, 0x10
+
+56                   0x~~~7: buzzer tone                                Read/Write               0x03, 0x06, 0x10
+
+128                 UART Parameter
+                    The high 8 bits indicate the parity mode: 0x00~0x02 Read/Write               0x03, 0x06
+                    The low 8 bits indicate the baudrate : 0x00~0x07    Read/Write
+
+130                 Device Address
+                    Directly store Modbus address                       Read/Write               0x03, 0x06
+                    Device address: 0x0001-0x00FF
+
+132                 Software Version                                    Read/Write               0x03
+                    Converting to decimal and then shifting the decimal 
+                    point two places to the left will represent the 
+                    software version 0x0064 = 100 = V1.00
+
 ## Description
 
 This is a project...
