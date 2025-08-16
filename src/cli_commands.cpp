@@ -3,13 +3,10 @@
 #include "peripherals/buzzer_control.h"
 #include "peripherals/digital_led_control.h"
 
-
 #include <Logger.h>
 
 #define TAG "CLI-COMMANDS"
-
 #define CLI_INTERFACE_VERSION "0.0.1"
-
 void cli_command(EmbeddedCli *embeddedCli, CliCommand *command)
 {
     LOG_I(TAG, "Received command: %S", command->name);

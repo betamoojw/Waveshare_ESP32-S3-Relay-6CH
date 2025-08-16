@@ -3,11 +3,10 @@
 #include "cli_commands.h"
 #include <Logger.h>
 
+#define TAG "CLI-INTERFACE"
 // Global CLI Variables (Definition)
 EmbeddedCli *cli;
 CLI_UINT cliBuffer[BYTES_TO_CLI_UINTS(CLI_BUFFER_SIZE)];
-
-#define TAG "CLI-INTERFACE"
 
 void cli_init()
 {
