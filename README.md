@@ -1,5 +1,7 @@
 # ESP32 project template
 
+## Refer to this project: https://github.com/Chinmay-ESP/SE-S3-RELAY-6CH
+
 ## Modbus RTU Protocol V1
 
 ### Function Code Introduction
