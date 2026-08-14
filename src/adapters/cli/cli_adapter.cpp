@@ -69,6 +69,131 @@ constexpr std::string_view firmwareVersion{"1.00"};
 	return true;
 }
 
+[[nodiscard]] bool parseUint32(const char *const text, std::uint32_t &value) noexcept
+{
+	if (text == nullptr || *text == '\0' || *text == '-')
+	{
+		return false;
+	}
+	unsigned long parsed{0};
+	const auto length = std::strlen(text);
+	const auto result = std::from_chars(text, text + length, parsed, 10);
+	if (result.ec != std::errc{} || result.ptr != text + length || parsed > std::numeric_limits<std::uint32_t>::max())
+	{
+		return false;
+	}
+	value = static_cast<std::uint32_t>(parsed);
+	return true;
+}
+
+[[nodiscard]] bool parseBoolean(const char *const text, bool &value) noexcept
+{
+	if (text == nullptr)
+	{
+		return false;
+	}
+	if (std::strcmp(text, "true") == 0 || std::strcmp(text, "yes") == 0 || std::strcmp(text, "enabled") == 0 ||
+		std::strcmp(text, "1") == 0)
+	{
+		value = true;
+		return true;
+	}
+	if (std::strcmp(text, "false") == 0 || std::strcmp(text, "no") == 0 || std::strcmp(text, "disabled") == 0 ||
+		std::strcmp(text, "0") == 0)
+	{
+		value = false;
+		return true;
+	}
+	return false;
+}
+
+[[nodiscard]] bool parseAddressPart(const char *const begin,
+									const char *const end,
+									const unsigned int maximum,
+									unsigned int &value) noexcept
+{
+	if (begin == nullptr || begin == end)
+	{
+		return false;
+	}
+	unsigned int parsed{0};
+	const auto result = std::from_chars(begin, end, parsed, 10);
+	if (result.ec != std::errc{} || result.ptr != end || parsed > maximum)
+	{
+		return false;
+	}
+	value = parsed;
+	return true;
+}
+
+[[nodiscard]] bool parseThreeLevelAddress(const char *const text,
+										 const char separator,
+										 const unsigned int firstMaximum,
+										 const unsigned int secondMaximum,
+										 unsigned int &first,
+										 unsigned int &second,
+										 unsigned int &third) noexcept
+{
+	if (text == nullptr)
+	{
+		return false;
+	}
+	const auto *const firstSeparator = std::strchr(text, separator);
+	const auto *const secondSeparator = firstSeparator == nullptr ? nullptr : std::strchr(firstSeparator + 1, separator);
+	const auto *const end = text + std::strlen(text);
+	return firstSeparator != nullptr && secondSeparator != nullptr &&
+		std::strchr(secondSeparator + 1, separator) == nullptr &&
+		parseAddressPart(text, firstSeparator, firstMaximum, first) &&
+		parseAddressPart(firstSeparator + 1, secondSeparator, secondMaximum, second) &&
+		parseAddressPart(secondSeparator + 1, end, 255, third);
+}
+
+[[nodiscard]] bool parseIndividualAddress(const char *const text, std::uint16_t &address) noexcept
+{
+	unsigned int area{0};
+	unsigned int line{0};
+	unsigned int device{0};
+	if (!parseThreeLevelAddress(text, '.', 15, 15, area, line, device))
+	{
+		return false;
+	}
+	address = static_cast<std::uint16_t>((area << 12U) | (line << 8U) | device);
+	return address != 0;
+}
+
+[[nodiscard]] bool parseGroupAddress(const char *const text, std::uint16_t &address) noexcept
+{
+	if (text != nullptr && std::strcmp(text, "none") == 0)
+	{
+		address = 0;
+		return true;
+	}
+	unsigned int main{0};
+	unsigned int middle{0};
+	unsigned int sub{0};
+	if (!parseThreeLevelAddress(text, '/', 31, 7, main, middle, sub))
+	{
+		return false;
+	}
+	address = static_cast<std::uint16_t>((main << 11U) | (middle << 8U) | sub);
+	return address != 0;
+}
+
+void formatGroupAddress(const std::uint16_t address, char *const output, const std::size_t outputSize) noexcept
+{
+	if (address == 0)
+	{
+		std::snprintf(output, outputSize, "none");
+		return;
+	}
+	std::snprintf(output,
+		outputSize,
+		"%u/%u/%u",
+		static_cast<unsigned int>(address >> 11U),
+		static_cast<unsigned int>((address >> 8U) & 0x07U),
+		static_cast<unsigned int>(address & 0xFFU));
+}
+
 [[nodiscard]] const char *clientError(const ports::ModbusClientResult result) noexcept
 {
 	switch (result)
@@ -143,7 +268,7 @@ CliInitializeResult CliAdapter::initialize() noexcept
 	cli_->appContext = this;
 	cli_->writeChar = writeCharacter;
 	cli_->onCommand = unknownCommand;
-	const std::array<CliCommandBinding, 14> bindings{{
+	const std::array<CliCommandBinding, 17> bindings{{
 		{"version", "Firmware and CLI version", true, this, versionCommand},
 		{"status", "Machine-readable device status", true, this, statusCommand},
 		{"get-relay", "get-relay [all|0..5]", true, this, getRelayCommand},
@@ -157,6 +282,9 @@ CliInitializeResult CliAdapter::initialize() noexcept
 		{"set-modbus-role", "set-modbus-role [server|client]", true, this, setModbusRoleCommand},
 		{"modbus-read-holding", "modbus-read-holding [unit] [address] [count]", true, this, modbusReadHoldingCommand},
 		{"modbus-write-register", "modbus-write-register [unit] [address] [value]", true, this, modbusWriteRegisterCommand},
+		{"get-knx", "get-knx [general|channel 0..5]", true, this, getKnxCommand},
+		{"set-knx", "set-knx [parameter] [value]", true, this, setKnxCommand},
+		{"set-knx-channel", "set-knx-channel [0..5] [parameter] [value]", true, this, setKnxChannelCommand},
 		{"reboot", "Request a controlled restart", true, this, rebootCommand},
 	}};
 	for (const auto &binding : bindings)
@@ -337,6 +465,21 @@ void CliAdapter::modbusWriteRegisterCommand(EmbeddedCli *, char *const arguments
 	static_cast<CliAdapter *>(context)->handleModbusWriteRegister(arguments);
 }
 
+void CliAdapter::getKnxCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleGetKnx(arguments);
+}
+
+void CliAdapter::setKnxCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleSetKnx(arguments);
+}
+
+void CliAdapter::setKnxChannelCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleSetKnxChannel(arguments);
+}
+
 void CliAdapter::rebootCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
 {
 	static_cast<CliAdapter *>(context)->handleReboot(arguments);
@@ -344,7 +487,7 @@ void CliAdapter::rebootCommand(EmbeddedCli *, char *const arguments, void *const
 
 bool CliAdapter::dependenciesValid() const noexcept
 {
-	return dependencies_.stream != nullptr && dependencies_.commandQueue != nullptr && dependencies_.relayService != nullptr &&
+	return dependencies_.stream != nullptr && dependencies_.switchingPolicy != nullptr && dependencies_.relayService != nullptr &&
 		   dependencies_.lifecycleSupervisor != nullptr && dependencies_.diagnostics != nullptr &&
 		   dependencies_.configurationService != nullptr && dependencies_.statusIndicator != nullptr &&
 		   dependencies_.button != nullptr && dependencies_.modbus.isValid() && dependencies_.clock.isValid();
@@ -358,13 +501,13 @@ bool CliAdapter::mutatingCommandAllowed() const noexcept
 
 bool CliAdapter::enqueueRelayBatch(const app::RelayCommandBatch &batch) noexcept
 {
-	const auto result = dependencies_.commandQueue->enqueue(batch);
-	if (result == app::RelayCommandEnqueueResult::Accepted)
+	const auto result = dependencies_.switchingPolicy->requestBatch(batch);
+	if (result == app::SwitchingPolicyResult::Accepted)
 	{
 		print("ok=true result=queued");
 		return true;
 	}
-	if (result == app::RelayCommandEnqueueResult::QueueFull)
+	if (result == app::SwitchingPolicyResult::QueueFull)
 	{
 		dependencies_.diagnostics->recordCommandQueueFull(dependencies_.clock.nowMs());
 		print("ok=false error=queue-full");
@@ -453,6 +596,67 @@ void CliAdapter::printButton() noexcept
 		"ok=true initialized=%s pressed=%s",
 		dependencies_.button->isInitialized() ? "true" : "false",
 		dependencies_.button->isPressed() ? "true" : "false");
+	print(output);
+}
+
+void CliAdapter::printKnxGeneral() noexcept
+{
+	const auto &configuration = dependencies_.configurationService->active();
+	const auto &knx = configuration.knx;
+	char heartbeatAddress[16]{};
+	char centralSwitchAddress[16]{};
+	char centralOffAddress[16]{};
+	char deviceFaultAddress[16]{};
+	formatGroupAddress(knx.heartbeatGroupAddress, heartbeatAddress, sizeof(heartbeatAddress));
+	formatGroupAddress(knx.centralSwitchGroupAddress, centralSwitchAddress, sizeof(centralSwitchAddress));
+	formatGroupAddress(knx.centralOffGroupAddress, centralOffAddress, sizeof(centralOffAddress));
+	formatGroupAddress(knx.deviceFaultGroupAddress, deviceFaultAddress, sizeof(deviceFaultAddress));
+	char output[512]{};
+	std::snprintf(output,
+		sizeof(output),
+		"ok=true scope=general generation=%lu enabled=%s individual_address=%u.%u.%u startup_delay_ms=%lu "
+		"telegram_interval_ms=%u cyclic_status_ms=%lu heartbeat_interval_ms=%lu read_switch=%s heartbeat_ga=%s "
+		"central_switch_ga=%s central_off_ga=%s device_fault_ga=%s",
+		static_cast<unsigned long>(configuration.generation),
+		knx.enabled ? "true" : "false",
+		static_cast<unsigned int>(knx.individualAddress >> 12U),
+		static_cast<unsigned int>((knx.individualAddress >> 8U) & 0x0FU),
+		static_cast<unsigned int>(knx.individualAddress & 0xFFU),
+		static_cast<unsigned long>(knx.startupTransmitDelayMs),
+		static_cast<unsigned int>(knx.minimumTelegramIntervalMs),
+		static_cast<unsigned long>(knx.cyclicStatusIntervalMs),
+		static_cast<unsigned long>(knx.heartbeatIntervalMs),
+		knx.readSwitchObject ? "true" : "false",
+		heartbeatAddress,
+		centralSwitchAddress,
+		centralOffAddress,
+		deviceFaultAddress);
+	print(output);
+}
+
+void CliAdapter::printKnxChannel(const std::uint8_t channel) noexcept
+{
+	const auto &configuration = dependencies_.configurationService->active().knx.channels[channel];
+	char switchAddress[16]{};
+	char statusAddress[16]{};
+	char faultAddress[16]{};
+	formatGroupAddress(configuration.switchGroupAddress, switchAddress, sizeof(switchAddress));
+	formatGroupAddress(configuration.statusGroupAddress, statusAddress, sizeof(statusAddress));
+	formatGroupAddress(configuration.faultGroupAddress, faultAddress, sizeof(faultAddress));
+	char output[384]{};
+	std::snprintf(output,
+		sizeof(output),
+		"ok=true scope=channel channel=%u switch_ga=%s status_ga=%s fault_ga=%s command_inverted=%s "
+		"status_inverted=%s startup_status=%s central_switch=%s central_off=%s",
+		static_cast<unsigned int>(channel),
+		switchAddress,
+		statusAddress,
+		faultAddress,
+		configuration.commandPolarityInverted ? "true" : "false",
+		configuration.statusPolarityInverted ? "true" : "false",
+		configuration.sendStatusAfterStartup ? "true" : "false",
+		configuration.participatesInCentralSwitch ? "true" : "false",
+		configuration.participatesInCentralOff ? "true" : "false");
 	print(output);
 }
 
@@ -712,6 +916,233 @@ void CliAdapter::handleModbusWriteRegister(char *const arguments) noexcept
 		return;
 	}
 	print("ok=true result=written");
+}
+
+void CliAdapter::handleGetKnx(char *const arguments) noexcept
+{
+	const auto tokenCount = embeddedCliGetTokenCount(arguments);
+	if (tokenCount == 0 || (tokenCount == 1 && std::strcmp(embeddedCliGetToken(arguments, 1), "general") == 0))
+	{
+		printKnxGeneral();
+		return;
+	}
+	if (tokenCount == 2 && std::strcmp(embeddedCliGetToken(arguments, 1), "channel") == 0)
+	{
+		std::uint8_t channel{0};
+		if (!parseChannel(embeddedCliGetToken(arguments, 2), channel))
+		{
+			print("ok=false error=invalid-channel");
+			return;
+		}
+		printKnxChannel(channel);
+		return;
+	}
+	print("ok=false error=usage usage=get-knx_[general|channel_0..5]");
+}
+
+void CliAdapter::handleSetKnx(char *const arguments) noexcept
+{
+	if (!mutatingCommandAllowed())
+	{
+		print("ok=false error=not-authorized");
+		return;
+	}
+	if (embeddedCliGetTokenCount(arguments) != 2)
+	{
+		print("ok=false error=usage usage=set-knx_[parameter]_[value]");
+		return;
+	}
+	const auto *const parameter = embeddedCliGetToken(arguments, 1);
+	const auto *const value = embeddedCliGetToken(arguments, 2);
+	auto configuration = dependencies_.configurationService->active();
+	auto &knx = configuration.knx;
+	bool booleanValue{false};
+	std::uint16_t uint16Value{0};
+	std::uint32_t uint32Value{0};
+	bool validValue{false};
+	if (std::strcmp(parameter, "enabled") == 0)
+	{
+		validValue = parseBoolean(value, booleanValue);
+		knx.enabled = booleanValue;
+	}
+	else if (std::strcmp(parameter, "individual-address") == 0)
+	{
+		validValue = parseIndividualAddress(value, uint16Value);
+		knx.individualAddress = uint16Value;
+	}
+	else if (std::strcmp(parameter, "startup-delay-ms") == 0)
+	{
+		validValue = parseUint32(value, uint32Value);
+		knx.startupTransmitDelayMs = uint32Value;
+	}
+	else if (std::strcmp(parameter, "telegram-interval-ms") == 0)
+	{
+		validValue = parseUint16(value, 1000, uint16Value);
+		knx.minimumTelegramIntervalMs = uint16Value;
+	}
+	else if (std::strcmp(parameter, "cyclic-status-ms") == 0)
+	{
+		validValue = parseUint32(value, uint32Value);
+		knx.cyclicStatusIntervalMs = uint32Value;
+	}
+	else if (std::strcmp(parameter, "heartbeat-interval-ms") == 0)
+	{
+		validValue = parseUint32(value, uint32Value);
+		knx.heartbeatIntervalMs = uint32Value;
+	}
+	else if (std::strcmp(parameter, "read-switch") == 0)
+	{
+		validValue = parseBoolean(value, booleanValue);
+		knx.readSwitchObject = booleanValue;
+	}
+	else if (std::strcmp(parameter, "heartbeat-ga") == 0)
+	{
+		validValue = parseGroupAddress(value, uint16Value);
+		knx.heartbeatGroupAddress = uint16Value;
+	}
+	else if (std::strcmp(parameter, "central-switch-ga") == 0)
+	{
+		validValue = parseGroupAddress(value, uint16Value);
+		knx.centralSwitchGroupAddress = uint16Value;
+	}
+	else if (std::strcmp(parameter, "central-off-ga") == 0)
+	{
+		validValue = parseGroupAddress(value, uint16Value);
+		knx.centralOffGroupAddress = uint16Value;
+	}
+	else if (std::strcmp(parameter, "device-fault-ga") == 0)
+	{
+		validValue = parseGroupAddress(value, uint16Value);
+		knx.deviceFaultGroupAddress = uint16Value;
+	}
+	else
+	{
+		print("ok=false error=invalid-parameter");
+		return;
+	}
+	if (!validValue)
+	{
+		print("ok=false error=invalid-value");
+		return;
+	}
+	commitKnxConfiguration(configuration);
+}
+
+void CliAdapter::handleSetKnxChannel(char *const arguments) noexcept
+{
+	if (!mutatingCommandAllowed())
+	{
+		print("ok=false error=not-authorized");
+		return;
+	}
+	if (embeddedCliGetTokenCount(arguments) != 3)
+	{
+		print("ok=false error=usage usage=set-knx-channel_[0..5]_[parameter]_[value]");
+		return;
+	}
+	std::uint8_t channel{0};
+	if (!parseChannel(embeddedCliGetToken(arguments, 1), channel))
+	{
+		print("ok=false error=invalid-channel");
+		return;
+	}
+	const auto *const parameter = embeddedCliGetToken(arguments, 2);
+	const auto *const value = embeddedCliGetToken(arguments, 3);
+	auto configuration = dependencies_.configurationService->active();
+	auto &knxChannel = configuration.knx.channels[channel];
+	std::uint16_t address{0};
+	bool booleanValue{false};
+	bool validValue{false};
+	if (std::strcmp(parameter, "switch-ga") == 0)
+	{
+		validValue = parseGroupAddress(value, address);
+		knxChannel.switchGroupAddress = address;
+	}
+	else if (std::strcmp(parameter, "status-ga") == 0)
+	{
+		validValue = parseGroupAddress(value, address);
+		knxChannel.statusGroupAddress = address;
+	}
+	else if (std::strcmp(parameter, "fault-ga") == 0)
+	{
+		validValue = parseGroupAddress(value, address);
+		knxChannel.faultGroupAddress = address;
+	}
+	else if (std::strcmp(parameter, "command-inverted") == 0)
+	{
+		validValue = parseBoolean(value, booleanValue);
+		knxChannel.commandPolarityInverted = booleanValue;
+	}
+	else if (std::strcmp(parameter, "status-inverted") == 0)
+	{
+		validValue = parseBoolean(value, booleanValue);
+		knxChannel.statusPolarityInverted = booleanValue;
+	}
+	else if (std::strcmp(parameter, "startup-status") == 0)
+	{
+		validValue = parseBoolean(value, booleanValue);
+		knxChannel.sendStatusAfterStartup = booleanValue;
+	}
+	else if (std::strcmp(parameter, "central-switch") == 0)
+	{
+		validValue = parseBoolean(value, booleanValue);
+		knxChannel.participatesInCentralSwitch = booleanValue;
+	}
+	else if (std::strcmp(parameter, "central-off") == 0)
+	{
+		validValue = parseBoolean(value, booleanValue);
+		knxChannel.participatesInCentralOff = booleanValue;
+	}
+	else
+	{
+		print("ok=false error=invalid-parameter");
+		return;
+	}
+	if (!validValue)
+	{
+		print("ok=false error=invalid-value");
+		return;
+	}
+	commitKnxConfiguration(configuration);
+}
+
+void CliAdapter::commitKnxConfiguration(const domain::Configuration &configuration) noexcept
+{
+	dependencies_.configurationService->discardStaged();
+	if (dependencies_.configurationService->stage(configuration) != app::ConfigurationStageResult::Staged)
+	{
+		char output[96]{};
+		std::snprintf(output,
+			sizeof(output),
+			"ok=false error=invalid-configuration validation=%u",
+			static_cast<unsigned int>(dependencies_.configurationService->lastValidationError()));
+		print(output);
+		return;
+	}
+	const auto result = dependencies_.configurationService->commit();
+	if (result == app::ConfigurationCommitResult::PersistenceFailure)
+	{
+		dependencies_.configurationService->discardStaged();
+		print("ok=false error=persistence-failure");
+		return;
+	}
+	if (result == app::ConfigurationCommitResult::NothingStaged)
+	{
+		print("ok=false error=configuration-state");
+		return;
+	}
+	const auto &active = dependencies_.configurationService->active();
+	dependencies_.diagnostics->updateConfiguration(true,
+		active.generation,
+		dependencies_.configurationService->lastLoadResult(),
+		dependencies_.configurationService->lastSaveResult());
+	char output[128]{};
+	std::snprintf(output,
+		sizeof(output),
+		"ok=true result=committed generation=%lu restart_required=%s",
+		static_cast<unsigned long>(active.generation),
+		result == app::ConfigurationCommitResult::CommittedRestartRequired ? "true" : "false");
+	print(output);
 }
 
 void CliAdapter::handleReboot(char *const arguments) noexcept

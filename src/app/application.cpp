@@ -40,17 +40,20 @@ constexpr bool mutatingCliCommandsEnabled{false};
 Application::Application() noexcept
 	: lifecycle_{diagnostics_.lifecycleEventSink()},
 	  relayOutput_{adapters::bsp::waveshareEsp32S3Relay6Ch},
-	  relayService_{relayOutput_.port(), diagnostics_.relayEventSink()},
+	  relayService_{relayOutput_.port(), diagnostics_.relayEventSink(), commandArbiter_},
+	  switchingPolicy_{commandQueue_, commandArbiter_},
+	  sceneService_{switchingPolicy_, relayService_},
+	  relayTimerService_{switchingPolicy_},
 	  defaultConfigurationSource_{adapters::configuration::embeddedDefaultConfigurationJson()},
 	  configurationService_{settingsStore_.port()},
 	  statusIndicator_{adapters::bsp::waveshareEsp32S3Relay6Ch},
 	  button_{adapters::bsp::waveshareEsp32S3Relay6Ch, handleButtonEvent, this},
-	  knx_{{&commandQueue_, &relayService_, &diagnostics_, ports::ClockPort{monotonicMilliseconds, this}}},
+	  knx_{{&switchingPolicy_, &relayService_, &diagnostics_, ports::ClockPort{monotonicMilliseconds, this}}},
 	  modbusConfigurationGateway_{{&configurationService_,
 		&lifecycle_,
 		&diagnostics_,
 		ports::ClockPort{monotonicMilliseconds, this}}},
-	  modbusApplicationGateway_{{&commandQueue_,
+	  modbusApplicationGateway_{{&switchingPolicy_,
 		&relayService_,
 		&configurationService_,
 		&lifecycle_,
@@ -69,7 +72,7 @@ Application::Application() noexcept
 		&modbusApplicationGateway_,
 		&diagnostics_}},
 	  cli_{{&Serial,
-		&commandQueue_,
+		&switchingPolicy_,
 		&relayService_,
 		&lifecycle_,
 		&diagnostics_,
@@ -88,6 +91,8 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	modbusAvailable_ = false;
 	cliAvailable_ = false;
 	commandQueue_.clear();
+	relayTimerService_.cancelAll();
+	sceneService_.disable();
 	if (resetCategory() == domain::ResetCategory::Watchdog)
 	{
 		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::WatchdogReset,
@@ -226,6 +231,7 @@ void Application::update(const std::uint32_t nowMs) noexcept
 	{
 		return;
 	}
+	static_cast<void>(relayTimerService_.update(nowMs));
 	if (nowMs - lastRelayProcessAtMs_ >= relayProcessIntervalMs)
 	{
 		lastRelayProcessAtMs_ = nowMs;

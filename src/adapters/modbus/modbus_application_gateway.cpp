@@ -11,7 +11,7 @@ ModbusApplicationGateway::ModbusApplicationGateway(const ModbusApplicationGatewa
 
 bool ModbusApplicationGateway::isValid() const noexcept
 {
-	return dependencies_.commandQueue != nullptr && dependencies_.relayService != nullptr &&
+	return dependencies_.switchingPolicy != nullptr && dependencies_.relayService != nullptr &&
 		   dependencies_.configurationService != nullptr && dependencies_.lifecycleSupervisor != nullptr &&
 		   dependencies_.diagnostics != nullptr && dependencies_.snapshotExtensionProvider != nullptr;
 }
@@ -84,15 +84,17 @@ WriteBatchResult ModbusApplicationGateway::submit(const HoldingWriteBatch &batch
 		commandBatch.commands[index] = batch.relayCommands[index];
 	}
 
-	switch (dependencies_.commandQueue->enqueue(commandBatch))
+	switch (dependencies_.switchingPolicy->requestBatch(commandBatch))
 	{
-	case app::RelayCommandEnqueueResult::Accepted:
+	case app::SwitchingPolicyResult::Accepted:
 		return WriteBatchResult::Accepted;
-	case app::RelayCommandEnqueueResult::QueueFull:
+	case app::SwitchingPolicyResult::QueueFull:
 		return WriteBatchResult::QueueFull;
-	case app::RelayCommandEnqueueResult::EmptyBatch:
-	case app::RelayCommandEnqueueResult::TooManyCommands:
-	case app::RelayCommandEnqueueResult::InvalidSafetyBatch:
+	case app::SwitchingPolicyResult::NoParticipants:
+	case app::SwitchingPolicyResult::InvalidChannel:
+	case app::SwitchingPolicyResult::InvalidAction:
+	case app::SwitchingPolicyResult::InvalidSource:
+	case app::SwitchingPolicyResult::SafetyLockout:
 	default:
 		return WriteBatchResult::IllegalValue;
 	}

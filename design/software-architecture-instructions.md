@@ -70,6 +70,10 @@ flowchart TB
 		end
 
 		subgraph Application[Application layer]
+				SP[SwitchingPolicyService]
+				SCENE[SceneService]
+				TIMER[RelayTimerService]
+				QUEUE[RelayCommandQueue]
 				RC[RelayCommandService]
 				ARB[CommandArbiter]
 				CFG[ConfigurationService]
@@ -90,7 +94,13 @@ flowchart TB
 				LOG[Logging and metrics]
 		end
 
-		Inbound --> Application
+		Inbound --> SP
+		Inbound --> SCENE
+		SCENE --> SP
+		TIMER --> SP
+		SP --> QUEUE
+		QUEUE --> RC
+		SP --> ARB
 		Application --> Domain
 		Application --> Outbound
 ```
@@ -160,9 +170,39 @@ If output readback is not electrically available, `applied state` means the last
 
 Safety commands have highest priority and may force one or more channels off. While safety lockout is active, ordinary on/toggle requests MUST be rejected.
 
-Among non-safety sources, the default policy is deterministic last-accepted-command-wins using the application task's serialized receive order. Wall-clock time MUST NOT be used for ordering. Deployments needing manual override, interlock, staircase timer, mutually exclusive channels, or source priority MUST implement those as explicit policies in `CommandArbiter`, not as protocol-specific conditions.
+Among non-safety sources, the default policy is deterministic last-accepted-command-wins using the application task's serialized receive order. Wall-clock time MUST NOT be used for ordering. Deployments needing manual override, interlock, mutually exclusive channels, or source priority MUST implement those as explicit `SwitchingPolicyService` policies delegated to `CommandArbiter`, not as protocol-specific conditions. Staircase and other deadline behavior belongs to `RelayTimerService` and is revalidated through `SwitchingPolicyService` when due.
 
 Every accepted or rejected command MUST produce a result containing the correlation ID, final state, and reason code. Protocol adapters translate reason codes into protocol-native responses.
+
+### 6.5 Application Switching Services
+
+Advanced switching behavior MUST be divided among three protocol-neutral application services. These services MUST use domain types and abstract ports only; they MUST NOT include Arduino, KNX, Modbus, HTTP, GPIO, NVS, or vendor-library types.
+
+`SwitchingPolicyService` is the single application entry point for immediate single-channel and multi-channel switching requests from KNX, Modbus, CLI, web, buttons, restore, scenes, and expired timers. It shall:
+
+- validate typed channels, actions, sources, lifecycle eligibility, lockout, forced operation, interlocks, mutually exclusive groups, and other configured switching policies;
+- use `CommandArbiter` for arbitration decisions rather than duplicating arbitration rules;
+- construct bounded `RelayCommand` or all-or-none command batches and submit them to `RelayCommandQueue`;
+- return typed accepted, deferred, rejected, and queue-full results without changing GPIO or authoritative relay snapshots;
+- preserve the source and correlation ID of the initiating request through scene expansion and timer expiry.
+
+`SceneService` owns scene recall and learning behavior. It shall:
+
+- map configured scene numbers to bounded per-channel target states and validate the complete scene before application;
+- submit recalls through `SwitchingPolicyService` as one all-or-none operation;
+- learn from current applied-state snapshots, never requested, optimistic, or pending states;
+- stage learned values through `ConfigurationService`; protocol callbacks and scene handling MUST NOT write NVS directly;
+- remain disabled and expose no scene objects when scene configuration or persistence support is unavailable.
+
+`RelayTimerService` owns delayed and duration-based switching behavior, including on/off delay, staircase time, minimum on/off time, maximum on time, warning deadlines, and bounded deferred commands. It shall:
+
+- use fixed-capacity per-channel state and wrap-safe unsigned monotonic deadlines;
+- retain at most the configured bounded number of pending operations and define replacement, cancellation, and queue-full behavior explicitly;
+- perform no blocking waits, dynamic allocation, GPIO access, persistence writes, or protocol callbacks;
+- resubmit each due operation through `SwitchingPolicyService` so current safety, lockout, interlock, and lifecycle policies are revalidated at execution time;
+- cancel volatile timers during restart unless persisted timer restoration is explicitly configured, failure-atomic, and covered by tests.
+
+`RelayCommandService` remains the sole owner of authoritative requested/applied relay snapshots and output application. `SceneService`, `RelayTimerService`, and `SwitchingPolicyService` MUST NOT mutate those snapshots directly. Dependency direction is `SceneService -> SwitchingPolicyService`, `RelayTimerService -> SwitchingPolicyService`, and `SwitchingPolicyService -> RelayCommandQueue`; reverse dependencies are prohibited. The composition root constructs and connects all services.
 
 ## 7. Hardware and BSP
 
@@ -348,7 +388,7 @@ The adapter exposes, for each enabled relay channel:
 | Switch status | Device to bus | DPT 1.001 | Published from applied-state events |
 | Channel fault | Device to bus | Suitable configured 1-bit/alarm DPT | Published on change |
 
-Optional central off, scene, lockout, and time functions MUST be modeled as domain policies before adding KNX group objects. A KNX callback MUST translate a telegram into a typed command and enqueue it; it MUST NOT operate a relay directly. Status MUST come from the resulting domain event, avoiding optimistic echo.
+Optional central off, lockout, interlock, and forced-operation functions MUST be implemented through `SwitchingPolicyService`; scene functions MUST use `SceneService`; and delay, staircase, minimum-time, and maximum-on functions MUST use `RelayTimerService` before corresponding KNX group objects are exposed. A KNX callback MUST only decode the datapoint, resolve configured bindings, and invoke the appropriate application service. It MUST NOT construct protocol-specific switching policy, operate a relay directly, or mutate application snapshots. Status MUST come from the resulting domain event, avoiding optimistic echo.
 
 The KNX adapter MUST support configurable individual address and group-address bindings, duplicate telegram handling, bus-loss diagnostics, and bounded retransmission. Commissioning/programming mode MUST require an explicit local action and visible indication. KNX key material, if KNX Secure is supported, MUST never appear in logs, CLI output, crash dumps, or web responses.
 
@@ -358,7 +398,7 @@ When Modbus and KNX are active simultaneously, both observe the same applied sta
 
 ### 13.1 CLI
 
-The CLI is a maintenance adapter, not a privileged bypass. Relay CLI commands MUST use `RelayCommandService`. Parsing MUST reject missing, negative, overflowing, or trailing-invalid values instead of using unchecked `atoi`. Production builds MUST provide a way to disable mutating CLI commands or require a maintenance authorization state.
+The CLI is a maintenance adapter, not a privileged bypass. Relay CLI commands MUST enter through `SwitchingPolicyService`; scene and timer maintenance commands MUST use `SceneService` and `RelayTimerService` respectively. The CLI MUST NOT invoke `RelayCommandService` as a policy bypass. Parsing MUST reject missing, negative, overflowing, or trailing-invalid values instead of using unchecked `atoi`. Production builds MUST provide a way to disable mutating CLI commands or require a maintenance authorization state.
 
 CLI output SHOULD provide stable machine-readable status in addition to concise human-readable output. Secrets and KNX/security keys MUST never be printed.
 
@@ -444,6 +484,12 @@ src/
 		application.cpp
 		lifecycle_supervisor.*
 		relay_command_service.*
+		switching_policy_service.h
+		switching_policy_service.cpp
+		scene_service.h
+		scene_service.cpp
+		relay_timer_service.h
+		relay_timer_service.cpp
 		command_arbiter.*
 		configuration_service.*
 		diagnostics_service.*
@@ -509,6 +555,9 @@ Host tests MUST cover:
 - idempotent set and exactly-once toggle behavior;
 - arbitration and safety lockout from every command source;
 - all-or-none multi-channel validation;
+- `SwitchingPolicyService` validation, arbitration delegation, interlocks, forced operation, atomic batches, and queue-full behavior;
+- `SceneService` recall, unknown/duplicate scene rejection, all-or-none expansion, applied-state learning, and persistence failure;
+- `RelayTimerService` wrap-around deadlines, replacement/cancellation, retrigger modes, minimum/maximum times, restart cancellation, and expiry revalidation through `SwitchingPolicyService`;
 - restore policies and abnormal-reset behavior;
 - configuration validation, CRC, A/B selection, and every schema migration;
 - Modbus map encoding, function/address/value exceptions, and word order;
@@ -552,7 +601,7 @@ No release is production-ready while random test behavior, placeholder device id
 Migration shall keep the firmware buildable at every stage:
 
 1. **Establish safety and toolchain baseline.** Change the build to C++17, add warnings, create the immutable board descriptor, verify relay polarity, initialize all relays off, and remove random/demo Modbus writes and blocking loop delay.
-2. **Create the domain and application service.** Add typed relay commands/results, authoritative snapshots, arbiter, fake output port, and host tests. Route CLI through this service.
+2. **Create the domain and application services.** Add typed relay commands/results, authoritative snapshots, `SwitchingPolicyService`, `SceneService`, `RelayTimerService`, arbiter, bounded command queue, fake output/clock ports, and host tests. Route every command source through the appropriate application service while keeping unimplemented scene/timer features disabled.
 3. **Replace polling-based relay control.** Convert Modbus callbacks into validated commands. Make toggle edge-triggered, publish actual state, fix bounds checks, and implement the typed sparse register map through address 132.
 4. **Add lifecycle and persistence.** Introduce validated configuration, unique provisioning, NVS A/B records, restore policy, reset-reason handling, diagnostics, and watchdog supervision.
 5. **Harden Modbus.** Derive RTU timing, implement protocol exceptions and identification, run parser integration/fuzz tests, and publish the final register map.

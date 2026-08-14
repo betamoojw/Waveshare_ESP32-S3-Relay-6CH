@@ -59,7 +59,9 @@ class RelayCommandService final
 public:
 	using RelayEventSink = ports::EventSink<domain::RelayStateChanged>;
 
-	RelayCommandService(ports::RelayOutputPort outputPort, RelayEventSink eventSink) noexcept;
+	RelayCommandService(ports::RelayOutputPort outputPort,
+						RelayEventSink eventSink,
+						CommandArbiter &commandArbiter) noexcept;
 
 	[[nodiscard]] RelayServiceInitializeResult initialize(std::uint32_t nowMs) noexcept;
 	[[nodiscard]] RelayCommandResult execute(const domain::RelayCommand &command) noexcept;
@@ -88,7 +90,7 @@ private:
 
 	ports::RelayOutputPort outputPort_;
 	RelayEventSink eventSink_;
-	CommandArbiter commandArbiter_;
+	CommandArbiter &commandArbiter_;
 	std::array<domain::RelaySnapshot, domain::relayChannelCount> snapshots_{};
 	bool initialized_{false};
 };

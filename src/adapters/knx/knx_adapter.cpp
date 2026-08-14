@@ -33,7 +33,7 @@ KnxInitializeResult KnxAdapter::initialize(const domain::KnxConfiguration &confi
 	hasPublishedTelegram_ = false;
 	deviceFaultPublished_ = false;
 	publishedDeviceFaultState_ = false;
-	if (dependencies_.commandQueue == nullptr || dependencies_.relayService == nullptr ||
+	if (dependencies_.switchingPolicy == nullptr || dependencies_.relayService == nullptr ||
 		dependencies_.diagnostics == nullptr || !dependencies_.clock.isValid())
 	{
 		return KnxInitializeResult::InvalidDependencies;
@@ -214,13 +214,13 @@ bool KnxAdapter::startTransport(const std::uint32_t nowMs) noexcept
 
 bool KnxAdapter::enqueueChannelCommand(const std::size_t channel, const bool value) noexcept
 {
-	app::RelayCommandBatch batch{};
 	const auto requestedOn = value != configuration_.channels[channel].commandPolarityInverted;
-	batch.commands[0] = domain::RelayCommand{domain::RelayChannelId{static_cast<std::uint8_t>(channel)},
+	return dependencies_.switchingPolicy->requestChannel(
+		domain::RelayChannelId{static_cast<std::uint8_t>(channel)},
 		requestedOn ? domain::RelayAction::SetOn : domain::RelayAction::SetOff,
-		domain::CommandSource::Knx, nextCorrelationId(), dependencies_.clock.nowMs()};
-	batch.count = 1;
-	return dependencies_.commandQueue->enqueue(batch) == app::RelayCommandEnqueueResult::Accepted;
+		domain::CommandSource::Knx,
+		nextCorrelationId(),
+		dependencies_.clock.nowMs()) == app::SwitchingPolicyResult::Accepted;
 }
 
 bool KnxAdapter::enqueueCentralCommand(const bool value, const bool centralOff) noexcept
@@ -229,20 +229,18 @@ bool KnxAdapter::enqueueCentralCommand(const bool value, const bool centralOff) 
 	{
 		return true;
 	}
-	app::RelayCommandBatch batch{};
+	std::array<bool, domain::relayChannelCount> participants{};
 	for (std::size_t channel = 0; channel < configuration_.channels.size(); ++channel)
 	{
-		const auto participates = centralOff ? configuration_.channels[channel].participatesInCentralOff :
+		participants[channel] = centralOff ? configuration_.channels[channel].participatesInCentralOff :
 			configuration_.channels[channel].participatesInCentralSwitch;
-		if (!participates)
-		{
-			continue;
-		}
-		batch.commands[batch.count++] = domain::RelayCommand{domain::RelayChannelId{static_cast<std::uint8_t>(channel)},
-			centralOff || !value ? domain::RelayAction::SetOff : domain::RelayAction::SetOn,
-			domain::CommandSource::Knx, nextCorrelationId(), dependencies_.clock.nowMs()};
 	}
-	return batch.count == 0 || dependencies_.commandQueue->enqueue(batch) == app::RelayCommandEnqueueResult::Accepted;
+	const auto result = dependencies_.switchingPolicy->requestGroup(participants,
+		centralOff || !value ? domain::RelayAction::SetOff : domain::RelayAction::SetOn,
+		domain::CommandSource::Knx,
+		nextCorrelationId(),
+		dependencies_.clock.nowMs());
+	return result == app::SwitchingPolicyResult::Accepted || result == app::SwitchingPolicyResult::NoParticipants;
 }
 
 void KnxAdapter::publishPending(const std::uint32_t nowMs) noexcept

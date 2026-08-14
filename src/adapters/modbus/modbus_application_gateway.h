@@ -6,6 +6,7 @@
 #include "../../app/lifecycle_supervisor.h"
 #include "../../app/relay_command_queue.h"
 #include "../../app/relay_command_service.h"
+#include "../../app/switching_policy_service.h"
 
 #include <cstdint>
 
@@ -16,7 +17,7 @@ using NonRelayWriteHandler = WriteBatchResult (*)(void *context, const HoldingWr
 
 struct ModbusApplicationGatewayDependencies final
 {
-	app::RelayCommandQueue *commandQueue{nullptr};
+	app::SwitchingPolicyService *switchingPolicy{nullptr};
 	const app::RelayCommandService *relayService{nullptr};
 	const app::ConfigurationService *configurationService{nullptr};
 	const app::LifecycleSupervisor *lifecycleSupervisor{nullptr};

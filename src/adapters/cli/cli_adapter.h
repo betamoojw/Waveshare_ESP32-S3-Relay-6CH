@@ -5,6 +5,7 @@
 #include "../../app/lifecycle_supervisor.h"
 #include "../../app/relay_command_queue.h"
 #include "../../app/relay_command_service.h"
+#include "../../app/switching_policy_service.h"
 #include "../../ports/clock_port.h"
 #include "../../ports/modbus_rtu_control_port.h"
 #include "../button/button_adapter.h"
@@ -37,7 +38,7 @@ enum class CliPollResult : std::uint8_t
 struct CliDependencies final
 {
 	Stream *stream{nullptr};
-	app::RelayCommandQueue *commandQueue{nullptr};
+	app::SwitchingPolicyService *switchingPolicy{nullptr};
 	const app::RelayCommandService *relayService{nullptr};
 	app::LifecycleSupervisor *lifecycleSupervisor{nullptr};
 	app::DiagnosticsService *diagnostics{nullptr};
@@ -80,6 +81,9 @@ private:
 	static void setModbusRoleCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void modbusReadHoldingCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void modbusWriteRegisterCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
+	static void getKnxCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
+	static void setKnxCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
+	static void setKnxChannelCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void rebootCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 
 	[[nodiscard]] bool dependenciesValid() const noexcept;
@@ -91,6 +95,8 @@ private:
 	void printRelay(std::uint8_t channel) noexcept;
 	void printIndicator() noexcept;
 	void printButton() noexcept;
+	void printKnxGeneral() noexcept;
+	void printKnxChannel(std::uint8_t channel) noexcept;
 	void handleSetRelay(char *arguments) noexcept;
 	void handleToggleRelay(char *arguments) noexcept;
 	void handleSetRgb(char *arguments) noexcept;
@@ -98,6 +104,10 @@ private:
 	void handleSetModbusRole(char *arguments) noexcept;
 	void handleModbusReadHolding(char *arguments) noexcept;
 	void handleModbusWriteRegister(char *arguments) noexcept;
+	void handleGetKnx(char *arguments) noexcept;
+	void handleSetKnx(char *arguments) noexcept;
+	void handleSetKnxChannel(char *arguments) noexcept;
+	void commitKnxConfiguration(const domain::Configuration &configuration) noexcept;
 	void handleReboot(char *arguments) noexcept;
 
 	CliDependencies dependencies_;

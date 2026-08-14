@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../../app/diagnostics_service.h"
-#include "../../app/relay_command_queue.h"
 #include "../../app/relay_command_service.h"
+#include "../../app/switching_policy_service.h"
 #include "../../domain/configuration.h"
 #include "../../ports/clock_port.h"
 
@@ -31,7 +31,7 @@ enum class KnxPollResult : std::uint8_t
 
 struct KnxAdapterDependencies final
 {
-	app::RelayCommandQueue *commandQueue;
+	app::SwitchingPolicyService *switchingPolicy;
 	app::RelayCommandService *relayService;
 	app::DiagnosticsService *diagnostics;
 	ports::ClockPort clock;

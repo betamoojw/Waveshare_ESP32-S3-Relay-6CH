@@ -4,8 +4,10 @@
 
 namespace switch_actuator::app
 {
-RelayCommandService::RelayCommandService(const ports::RelayOutputPort outputPort, const RelayEventSink eventSink) noexcept
-	: outputPort_{outputPort}, eventSink_{eventSink}
+RelayCommandService::RelayCommandService(const ports::RelayOutputPort outputPort,
+															 const RelayEventSink eventSink,
+															 CommandArbiter &commandArbiter) noexcept
+	: outputPort_{outputPort}, eventSink_{eventSink}, commandArbiter_{commandArbiter}
 {
 }
 

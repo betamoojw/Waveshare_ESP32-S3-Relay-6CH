@@ -25,7 +25,7 @@ An implementation MUST NOT expose a communication object until its complete beha
 2. KNX callbacks MUST translate telegrams into typed application commands and enqueue them. They MUST NOT write GPIO or mutate authoritative relay state.
 3. The `RelayCommandService` MUST remain the authoritative source for requested and applied relay state.
 4. Status objects MUST report applied state after successful output application. They MUST NOT optimistically echo a received command.
-5. Central, lock, forced-operation, timer, scene, and logic behavior MUST be implemented as domain/application policies shared by every command source where applicable. Protocol-specific policy in the KNX callback is prohibited.
+5. Central, lock, forced-operation, timer, scene, and logic behavior MUST be implemented as protocol-neutral domain/application policies shared by every command source where applicable. `SwitchingPolicyService` owns typed single-channel and atomic group command construction; KNX callbacks only decode DPTs, resolve configured bindings, and invoke that service. Protocol-specific switching policy in a KNX callback is prohibited.
 6. KNX processing MUST be non-blocking and execute at least once every 10 ms while the application is operational.
 7. Dynamic allocation after KNX startup SHOULD be avoided. Telegram processing, pending status publication, timers, scenes, and duplicate tracking MUST use bounded storage.
 8. Modbus, CLI, web, buttons, and KNX MUST observe one converged applied state and one arbitration policy.

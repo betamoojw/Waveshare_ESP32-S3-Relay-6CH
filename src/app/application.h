@@ -5,6 +5,9 @@
 #include "lifecycle_supervisor.h"
 #include "relay_command_queue.h"
 #include "relay_command_service.h"
+#include "relay_timer_service.h"
+#include "scene_service.h"
+#include "switching_policy_service.h"
 #include "../adapters/bsp/esp32_relay_output.h"
 #include "../adapters/button/button_adapter.h"
 #include "../adapters/cli/cli_adapter.h"
@@ -60,8 +63,12 @@ private:
 	DiagnosticsService diagnostics_{};
 	LifecycleSupervisor lifecycle_;
 	adapters::bsp::Esp32RelayOutput relayOutput_;
+	CommandArbiter commandArbiter_{};
 	RelayCommandService relayService_;
 	RelayCommandQueue commandQueue_{};
+	SwitchingPolicyService switchingPolicy_;
+	SceneService sceneService_;
+	RelayTimerService relayTimerService_;
 	adapters::nvs::NvsSettingsStore settingsStore_{};
 	adapters::configuration::JsonConfigurationSource defaultConfigurationSource_;
 	ConfigurationService configurationService_;
