@@ -10,7 +10,7 @@
 #include "../adapters/cli/cli_adapter.h"
 #include "../adapters/configuration/json_configuration_source.h"
 #include "../adapters/indicators/status_indicator.h"
-#include "../adapters/knx/null_knx_adapter.h"
+#include "../adapters/knx/knx_adapter.h"
 #include "../adapters/modbus/esp32_modbus_serial_transport.h"
 #include "../adapters/modbus/modbus_application_gateway.h"
 #include "../adapters/modbus/modbus_configuration_gateway.h"
@@ -67,7 +67,7 @@ private:
 	ConfigurationService configurationService_;
 	adapters::indicators::StatusIndicator statusIndicator_;
 	adapters::button::ButtonAdapter button_;
-	adapters::knx::NullKnxAdapter knx_;
+	adapters::knx::KnxAdapter knx_;
 	adapters::modbus::ModbusConfigurationGateway modbusConfigurationGateway_;
 	adapters::modbus::ModbusApplicationGateway modbusApplicationGateway_;
 	adapters::modbus::Esp32ModbusSerialTransport modbusSerialTransport_;

@@ -45,7 +45,7 @@ Application::Application() noexcept
 	  configurationService_{settingsStore_.port()},
 	  statusIndicator_{adapters::bsp::waveshareEsp32S3Relay6Ch},
 	  button_{adapters::bsp::waveshareEsp32S3Relay6Ch, handleButtonEvent, this},
-	  knx_{&diagnostics_},
+	  knx_{{&commandQueue_, &relayService_, &diagnostics_, ports::ClockPort{monotonicMilliseconds, this}}},
 	  modbusConfigurationGateway_{{&configurationService_,
 		&lifecycle_,
 		&diagnostics_,
@@ -162,7 +162,7 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	}
 	Serial.begin(115200);
 	cliAvailable_ = cli_.initialize() == adapters::cli::CliInitializeResult::Initialized;
-	const auto knxResult = knx_.initialize(configurationService_.active().knx.enabled, nowMs);
+	const auto knxResult = knx_.initialize(configurationService_.active().knx, nowMs);
 	const auto &modbusConfiguration = configurationService_.active().modbus;
 	const adapters::modbus::ModbusRtuConfiguration rtuConfiguration{
 		modbusConfiguration.unitId,

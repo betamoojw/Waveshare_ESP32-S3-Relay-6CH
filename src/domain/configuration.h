@@ -8,7 +8,7 @@
 
 namespace switch_actuator::domain
 {
-inline constexpr std::uint16_t currentConfigurationSchemaVersion{1};
+inline constexpr std::uint16_t currentConfigurationSchemaVersion{2};
 inline constexpr std::size_t boardModelCapacity{32};
 inline constexpr std::size_t hardwareRevisionCapacity{16};
 inline constexpr std::size_t deviceSerialCapacity{32};
@@ -44,12 +44,32 @@ struct RelayChannelConfiguration final
 	RelayState configuredDefault{RelayState::Off};
 };
 
+struct KnxChannelConfiguration final
+{
+	std::uint16_t switchGroupAddress{0};
+	std::uint16_t statusGroupAddress{0};
+	std::uint16_t faultGroupAddress{0};
+	bool commandPolarityInverted{false};
+	bool statusPolarityInverted{false};
+	bool sendStatusAfterStartup{true};
+	bool participatesInCentralSwitch{true};
+	bool participatesInCentralOff{true};
+};
+
 struct KnxConfiguration final
 {
 	bool enabled{false};
 	std::uint16_t individualAddress{0};
-	std::array<std::uint16_t, relayChannelCount> switchGroupAddresses{};
-	std::array<std::uint16_t, relayChannelCount> statusGroupAddresses{};
+	std::uint32_t startupTransmitDelayMs{3000};
+	std::uint16_t minimumTelegramIntervalMs{100};
+	std::uint32_t cyclicStatusIntervalMs{0};
+	std::uint32_t heartbeatIntervalMs{0};
+	bool readSwitchObject{false};
+	std::uint16_t heartbeatGroupAddress{0};
+	std::uint16_t centralSwitchGroupAddress{0};
+	std::uint16_t centralOffGroupAddress{0};
+	std::uint16_t deviceFaultGroupAddress{0};
+	std::array<KnxChannelConfiguration, relayChannelCount> channels{};
 };
 
 struct WebConfiguration final

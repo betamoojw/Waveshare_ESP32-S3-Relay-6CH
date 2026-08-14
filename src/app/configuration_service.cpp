@@ -4,6 +4,46 @@
 
 namespace switch_actuator::app
 {
+namespace
+{
+[[nodiscard]] bool sameKnxChannelConfiguration(const domain::KnxChannelConfiguration &left,
+												 const domain::KnxChannelConfiguration &right) noexcept
+{
+	return left.switchGroupAddress == right.switchGroupAddress && left.statusGroupAddress == right.statusGroupAddress &&
+		left.faultGroupAddress == right.faultGroupAddress &&
+		left.commandPolarityInverted == right.commandPolarityInverted &&
+		left.statusPolarityInverted == right.statusPolarityInverted &&
+		left.sendStatusAfterStartup == right.sendStatusAfterStartup &&
+		left.participatesInCentralSwitch == right.participatesInCentralSwitch &&
+		left.participatesInCentralOff == right.participatesInCentralOff;
+}
+
+[[nodiscard]] bool sameKnxConfiguration(const domain::KnxConfiguration &left,
+										 const domain::KnxConfiguration &right) noexcept
+{
+	if (left.enabled != right.enabled || left.individualAddress != right.individualAddress ||
+		left.startupTransmitDelayMs != right.startupTransmitDelayMs ||
+		left.minimumTelegramIntervalMs != right.minimumTelegramIntervalMs ||
+		left.cyclicStatusIntervalMs != right.cyclicStatusIntervalMs ||
+		left.heartbeatIntervalMs != right.heartbeatIntervalMs || left.readSwitchObject != right.readSwitchObject ||
+		left.heartbeatGroupAddress != right.heartbeatGroupAddress ||
+		left.centralSwitchGroupAddress != right.centralSwitchGroupAddress ||
+		left.centralOffGroupAddress != right.centralOffGroupAddress ||
+		left.deviceFaultGroupAddress != right.deviceFaultGroupAddress)
+	{
+		return false;
+	}
+	for (std::size_t channel = 0; channel < left.channels.size(); ++channel)
+	{
+		if (!sameKnxChannelConfiguration(left.channels[channel], right.channels[channel]))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+}
+
 ConfigurationService::ConfigurationService(const ports::SettingsStore settingsStore) noexcept
 	: settingsStore_{settingsStore}
 {
@@ -152,7 +192,7 @@ bool ConfigurationService::transportRestartRequired(const domain::Configuration 
 {
 	return current.modbus.unitId != replacement.modbus.unitId || current.modbus.baudRate != replacement.modbus.baudRate ||
 		   current.modbus.parity != replacement.modbus.parity || current.modbus.dataBits != replacement.modbus.dataBits ||
-		   current.modbus.stopBits != replacement.modbus.stopBits || current.knx.enabled != replacement.knx.enabled ||
+		   current.modbus.stopBits != replacement.modbus.stopBits || !sameKnxConfiguration(current.knx, replacement.knx) ||
 		   current.web.enabled != replacement.web.enabled;
 }
 

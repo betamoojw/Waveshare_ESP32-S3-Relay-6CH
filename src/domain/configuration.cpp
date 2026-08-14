@@ -37,6 +37,52 @@ template <std::size_t Capacity>
 {
 	return state == RelayState::Off || state == RelayState::On;
 }
+
+[[nodiscard]] bool isValidKnxInterval(const std::uint32_t intervalMs) noexcept
+{
+	return intervalMs == 0 || (intervalMs >= 10'000 && intervalMs <= 86'400'000);
+}
+
+[[nodiscard]] bool hasUniqueKnxCommandAddresses(const KnxConfiguration &configuration) noexcept
+{
+	std::array<std::uint16_t, relayChannelCount + 2> addresses{};
+	for (std::size_t channel = 0; channel < configuration.channels.size(); ++channel)
+	{
+		addresses[channel] = configuration.channels[channel].switchGroupAddress;
+	}
+	addresses[relayChannelCount] = configuration.centralSwitchGroupAddress;
+	addresses[relayChannelCount + 1] = configuration.centralOffGroupAddress;
+	for (std::size_t left = 0; left < addresses.size(); ++left)
+	{
+		if (addresses[left] == 0)
+		{
+			continue;
+		}
+		for (std::size_t right = left + 1; right < addresses.size(); ++right)
+		{
+			if (addresses[left] == addresses[right])
+			{
+				return false;
+			}
+		}
+	}
+	const auto collidesWithCommand = [&addresses](const std::uint16_t outputAddress) {
+		return outputAddress != 0 && std::find(addresses.begin(), addresses.end(), outputAddress) != addresses.end();
+	};
+	if (collidesWithCommand(configuration.heartbeatGroupAddress) ||
+		collidesWithCommand(configuration.deviceFaultGroupAddress))
+	{
+		return false;
+	}
+	for (const auto &channel : configuration.channels)
+	{
+		if (collidesWithCommand(channel.statusGroupAddress) || collidesWithCommand(channel.faultGroupAddress))
+		{
+			return false;
+		}
+	}
+	return true;
+}
 }
 
 ConfigurationValidationError validateConfiguration(const Configuration &configuration) noexcept
@@ -81,7 +127,13 @@ ConfigurationValidationError validateConfiguration(const Configuration &configur
 	{
 		return ConfigurationValidationError::InvalidRelayConfiguration;
 	}
-	if (configuration.knx.enabled && configuration.knx.individualAddress == 0)
+	if (configuration.knx.startupTransmitDelayMs > 60'000 ||
+		configuration.knx.minimumTelegramIntervalMs < 20 || configuration.knx.minimumTelegramIntervalMs > 1000 ||
+		!isValidKnxInterval(configuration.knx.cyclicStatusIntervalMs) ||
+		!isValidKnxInterval(configuration.knx.heartbeatIntervalMs) ||
+		!hasUniqueKnxCommandAddresses(configuration.knx) ||
+		(configuration.knx.enabled && configuration.knx.individualAddress == 0) ||
+		(configuration.knx.heartbeatIntervalMs != 0 && configuration.knx.heartbeatGroupAddress == 0))
 	{
 		return ConfigurationValidationError::InvalidKnxConfiguration;
 	}

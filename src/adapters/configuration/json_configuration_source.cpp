@@ -176,6 +176,60 @@ template <std::size_t Capacity>
 	}
 	return true;
 }
+
+[[nodiscard]] bool readKnxChannels(const JsonVariantConst value,
+										std::array<domain::KnxChannelConfiguration, domain::relayChannelCount> &output) noexcept
+{
+	if (!value.is<JsonArrayConst>())
+	{
+		return false;
+	}
+	const auto channels = value.as<JsonArrayConst>();
+	if (channels.size() != output.size())
+	{
+		return false;
+	}
+	for (std::size_t index = 0; index < output.size(); ++index)
+	{
+		const auto channel = channels[index];
+		if (!channel.is<JsonObjectConst>() || !channel["switchGroupAddress"].is<std::uint16_t>() ||
+			!channel["statusGroupAddress"].is<std::uint16_t>() || !channel["faultGroupAddress"].is<std::uint16_t>() ||
+			!channel["commandPolarityInverted"].is<bool>() || !channel["statusPolarityInverted"].is<bool>() ||
+			!channel["sendStatusAfterStartup"].is<bool>() || !channel["participatesInCentralSwitch"].is<bool>() ||
+			!channel["participatesInCentralOff"].is<bool>())
+		{
+			return false;
+		}
+		auto &parsed = output[index];
+		parsed.switchGroupAddress = channel["switchGroupAddress"].as<std::uint16_t>();
+		parsed.statusGroupAddress = channel["statusGroupAddress"].as<std::uint16_t>();
+		parsed.faultGroupAddress = channel["faultGroupAddress"].as<std::uint16_t>();
+		parsed.commandPolarityInverted = channel["commandPolarityInverted"].as<bool>();
+		parsed.statusPolarityInverted = channel["statusPolarityInverted"].as<bool>();
+		parsed.sendStatusAfterStartup = channel["sendStatusAfterStartup"].as<bool>();
+		parsed.participatesInCentralSwitch = channel["participatesInCentralSwitch"].as<bool>();
+		parsed.participatesInCentralOff = channel["participatesInCentralOff"].as<bool>();
+	}
+	return true;
+}
+
+[[nodiscard]] bool readLegacyKnxChannels(const JsonObjectConst knx,
+										  std::array<domain::KnxChannelConfiguration, domain::relayChannelCount> &output) noexcept
+{
+	std::array<std::uint16_t, domain::relayChannelCount> switchAddresses{};
+	std::array<std::uint16_t, domain::relayChannelCount> statusAddresses{};
+	if (!readAddressArray(knx["switchGroupAddresses"], switchAddresses) ||
+		!readAddressArray(knx["statusGroupAddresses"], statusAddresses))
+	{
+		return false;
+	}
+	for (std::size_t index = 0; index < output.size(); ++index)
+	{
+		output[index].switchGroupAddress = switchAddresses[index];
+		output[index].statusGroupAddress = statusAddresses[index];
+	}
+	return true;
+}
 }
 
 ports::ConfigurationSource JsonConfigurationSource::port() noexcept
@@ -217,7 +271,12 @@ ports::ConfigurationSourceResult JsonConfigurationSource::load(domain::Configura
 	}
 
 	domain::Configuration parsed{};
-	parsed.schemaVersion = root["schemaVersion"].as<std::uint16_t>();
+	const auto sourceSchemaVersion = root["schemaVersion"].as<std::uint16_t>();
+	if (sourceSchemaVersion != 1 && sourceSchemaVersion != domain::currentConfigurationSchemaVersion)
+	{
+		return ports::ConfigurationSourceResult::Invalid;
+	}
+	parsed.schemaVersion = domain::currentConfigurationSchemaVersion;
 	parsed.generation = 0;
 	if (!readText(identity["boardModel"], parsed.boardModel) ||
 		!readText(identity["hardwareRevision"], parsed.hardwareRevision) ||
@@ -250,9 +309,7 @@ ports::ConfigurationSourceResult JsonConfigurationSource::load(domain::Configura
 		parsed.relayChannels[index].enabled = relay["enabled"].as<bool>();
 	}
 
-	if (!knx["enabled"].is<bool>() || !knx["individualAddress"].is<std::uint16_t>() ||
-		!readAddressArray(knx["switchGroupAddresses"], parsed.knx.switchGroupAddresses) ||
-		!readAddressArray(knx["statusGroupAddresses"], parsed.knx.statusGroupAddresses) || !web["enabled"].is<bool>() ||
+	if (!knx["enabled"].is<bool>() || !knx["individualAddress"].is<std::uint16_t>() || !web["enabled"].is<bool>() ||
 		!web["securityProvisioned"].is<bool>() || !indicators["maximumBrightness"].is<std::uint8_t>() ||
 		!indicators["maximumBuzzerDutyPercent"].is<std::uint8_t>())
 	{
@@ -260,6 +317,35 @@ ports::ConfigurationSourceResult JsonConfigurationSource::load(domain::Configura
 	}
 	parsed.knx.enabled = knx["enabled"].as<bool>();
 	parsed.knx.individualAddress = knx["individualAddress"].as<std::uint16_t>();
+	if (sourceSchemaVersion == 1)
+	{
+		if (!readLegacyKnxChannels(knx.as<JsonObjectConst>(), parsed.knx.channels))
+		{
+			return ports::ConfigurationSourceResult::Invalid;
+		}
+	}
+	else
+	{
+		if (!knx["startupTransmitDelayMs"].is<std::uint32_t>() ||
+			!knx["minimumTelegramIntervalMs"].is<std::uint16_t>() ||
+			!knx["cyclicStatusIntervalMs"].is<std::uint32_t>() || !knx["heartbeatIntervalMs"].is<std::uint32_t>() ||
+			!knx["readSwitchObject"].is<bool>() || !knx["heartbeatGroupAddress"].is<std::uint16_t>() ||
+			!knx["centralSwitchGroupAddress"].is<std::uint16_t>() ||
+			!knx["centralOffGroupAddress"].is<std::uint16_t>() ||
+			!knx["deviceFaultGroupAddress"].is<std::uint16_t>() || !readKnxChannels(knx["channels"], parsed.knx.channels))
+		{
+			return ports::ConfigurationSourceResult::Invalid;
+		}
+		parsed.knx.startupTransmitDelayMs = knx["startupTransmitDelayMs"].as<std::uint32_t>();
+		parsed.knx.minimumTelegramIntervalMs = knx["minimumTelegramIntervalMs"].as<std::uint16_t>();
+		parsed.knx.cyclicStatusIntervalMs = knx["cyclicStatusIntervalMs"].as<std::uint32_t>();
+		parsed.knx.heartbeatIntervalMs = knx["heartbeatIntervalMs"].as<std::uint32_t>();
+		parsed.knx.readSwitchObject = knx["readSwitchObject"].as<bool>();
+		parsed.knx.heartbeatGroupAddress = knx["heartbeatGroupAddress"].as<std::uint16_t>();
+		parsed.knx.centralSwitchGroupAddress = knx["centralSwitchGroupAddress"].as<std::uint16_t>();
+		parsed.knx.centralOffGroupAddress = knx["centralOffGroupAddress"].as<std::uint16_t>();
+		parsed.knx.deviceFaultGroupAddress = knx["deviceFaultGroupAddress"].as<std::uint16_t>();
+	}
 	parsed.web.enabled = web["enabled"].as<bool>();
 	parsed.web.securityProvisioned = web["securityProvisioned"].as<bool>();
 	parsed.indicators.maximumBrightness = indicators["maximumBrightness"].as<std::uint8_t>();

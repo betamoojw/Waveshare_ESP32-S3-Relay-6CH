@@ -18,10 +18,14 @@ constexpr std::uint8_t slotB{1};
 constexpr std::uint8_t noActiveSlot{0xFF};
 constexpr std::uint32_t recordMagic{0x53414346};
 constexpr std::size_t recordHeaderSize{16};
-constexpr std::size_t configurationPayloadSize{159};
+constexpr std::uint16_t legacyConfigurationSchemaVersion{1};
+constexpr std::size_t legacyConfigurationPayloadSize{159};
+constexpr std::size_t configurationPayloadSize{224};
+constexpr std::size_t legacyConfigurationRecordSize{recordHeaderSize + legacyConfigurationPayloadSize};
 constexpr std::size_t configurationRecordSize{recordHeaderSize + configurationPayloadSize};
 
 using Payload = std::array<std::uint8_t, configurationPayloadSize>;
+using LegacyPayload = std::array<std::uint8_t, legacyConfigurationPayloadSize>;
 using Record = std::array<std::uint8_t, configurationRecordSize>;
 
 enum class SlotState : std::uint8_t
@@ -36,6 +40,7 @@ struct SlotRecord final
 	SlotState state{SlotState::Missing};
 	domain::Configuration configuration{};
 	Record encoded{};
+	std::size_t encodedLength{0};
 };
 
 class ByteWriter final
@@ -82,10 +87,11 @@ private:
 	std::size_t position_{0};
 };
 
+template <std::size_t PayloadSize>
 class ByteReader final
 {
 public:
-	explicit ByteReader(const Payload &payload) noexcept
+	explicit ByteReader(const std::array<std::uint8_t, PayloadSize> &payload) noexcept
 		: payload_{payload}
 	{
 	}
@@ -107,12 +113,12 @@ public:
 		return low | static_cast<std::uint32_t>(readU16()) << 16U;
 	}
 
-	template <typename Value, std::size_t Size>
-	void readArray(std::array<Value, Size> &values) noexcept
+	template <typename Array>
+	void readArray(Array &values) noexcept
 	{
 		for (auto &value : values)
 		{
-			value = static_cast<Value>(readU8());
+			value = static_cast<typename Array::value_type>(readU8());
 		}
 	}
 
@@ -122,7 +128,7 @@ public:
 	}
 
 private:
-	const Payload &payload_;
+	const std::array<std::uint8_t, PayloadSize> &payload_;
 	std::size_t position_{0};
 };
 
@@ -148,7 +154,8 @@ void writeU32(Record &record, const std::size_t offset, const std::uint32_t valu
 	return static_cast<std::uint32_t>(readU16(record, offset)) | static_cast<std::uint32_t>(readU16(record, offset + 2)) << 16U;
 }
 
-[[nodiscard]] std::uint32_t crc32(const Payload &payload) noexcept
+template <std::size_t Size>
+[[nodiscard]] std::uint32_t crc32(const std::array<std::uint8_t, Size> &payload) noexcept
 {
 	std::uint32_t crc{0xFFFFFFFF};
 	for (const auto byte : payload)
@@ -185,13 +192,25 @@ void writeU32(Record &record, const std::size_t offset, const std::uint32_t valu
 	}
 	writer.writeU8(configuration.knx.enabled ? 1 : 0);
 	writer.writeU16(configuration.knx.individualAddress);
-	for (const auto address : configuration.knx.switchGroupAddresses)
+	writer.writeU32(configuration.knx.startupTransmitDelayMs);
+	writer.writeU16(configuration.knx.minimumTelegramIntervalMs);
+	writer.writeU32(configuration.knx.cyclicStatusIntervalMs);
+	writer.writeU32(configuration.knx.heartbeatIntervalMs);
+	writer.writeU8(configuration.knx.readSwitchObject ? 1 : 0);
+	writer.writeU16(configuration.knx.heartbeatGroupAddress);
+	writer.writeU16(configuration.knx.centralSwitchGroupAddress);
+	writer.writeU16(configuration.knx.centralOffGroupAddress);
+	writer.writeU16(configuration.knx.deviceFaultGroupAddress);
+	for (const auto &channel : configuration.knx.channels)
 	{
-		writer.writeU16(address);
-	}
-	for (const auto address : configuration.knx.statusGroupAddresses)
-	{
-		writer.writeU16(address);
+		writer.writeU16(channel.switchGroupAddress);
+		writer.writeU16(channel.statusGroupAddress);
+		writer.writeU16(channel.faultGroupAddress);
+		writer.writeU8(channel.commandPolarityInverted ? 1 : 0);
+		writer.writeU8(channel.statusPolarityInverted ? 1 : 0);
+		writer.writeU8(channel.sendStatusAfterStartup ? 1 : 0);
+		writer.writeU8(channel.participatesInCentralSwitch ? 1 : 0);
+		writer.writeU8(channel.participatesInCentralOff ? 1 : 0);
 	}
 	writer.writeU8(configuration.web.enabled ? 1 : 0);
 	writer.writeU8(configuration.web.securityProvisioned ? 1 : 0);
@@ -233,13 +252,98 @@ void writeU32(Record &record, const std::size_t offset, const std::uint32_t valu
 	}
 	configuration.knx.enabled = knxEnabled != 0;
 	configuration.knx.individualAddress = reader.readU16();
-	for (auto &address : configuration.knx.switchGroupAddresses)
+	configuration.knx.startupTransmitDelayMs = reader.readU32();
+	configuration.knx.minimumTelegramIntervalMs = reader.readU16();
+	configuration.knx.cyclicStatusIntervalMs = reader.readU32();
+	configuration.knx.heartbeatIntervalMs = reader.readU32();
+	const auto readSwitchObject = reader.readU8();
+	if (readSwitchObject > 1)
 	{
-		address = reader.readU16();
+		return false;
 	}
-	for (auto &address : configuration.knx.statusGroupAddresses)
+	configuration.knx.readSwitchObject = readSwitchObject != 0;
+	configuration.knx.heartbeatGroupAddress = reader.readU16();
+	configuration.knx.centralSwitchGroupAddress = reader.readU16();
+	configuration.knx.centralOffGroupAddress = reader.readU16();
+	configuration.knx.deviceFaultGroupAddress = reader.readU16();
+	for (auto &channel : configuration.knx.channels)
 	{
-		address = reader.readU16();
+		channel.switchGroupAddress = reader.readU16();
+		channel.statusGroupAddress = reader.readU16();
+		channel.faultGroupAddress = reader.readU16();
+		const auto commandPolarityInverted = reader.readU8();
+		const auto statusPolarityInverted = reader.readU8();
+		const auto sendStatusAfterStartup = reader.readU8();
+		const auto participatesInCentralSwitch = reader.readU8();
+		const auto participatesInCentralOff = reader.readU8();
+		if (commandPolarityInverted > 1 || statusPolarityInverted > 1 || sendStatusAfterStartup > 1 ||
+			participatesInCentralSwitch > 1 || participatesInCentralOff > 1)
+		{
+			return false;
+		}
+		channel.commandPolarityInverted = commandPolarityInverted != 0;
+		channel.statusPolarityInverted = statusPolarityInverted != 0;
+		channel.sendStatusAfterStartup = sendStatusAfterStartup != 0;
+		channel.participatesInCentralSwitch = participatesInCentralSwitch != 0;
+		channel.participatesInCentralOff = participatesInCentralOff != 0;
+	}
+	const auto webEnabled = reader.readU8();
+	const auto securityProvisioned = reader.readU8();
+	if (webEnabled > 1 || securityProvisioned > 1)
+	{
+		return false;
+	}
+	configuration.web.enabled = webEnabled != 0;
+	configuration.web.securityProvisioned = securityProvisioned != 0;
+	configuration.indicators.maximumBrightness = reader.readU8();
+	configuration.indicators.maximumBuzzerDutyPercent = reader.readU8();
+	return reader.complete() && domain::validateConfiguration(configuration) == domain::ConfigurationValidationError::None;
+}
+
+[[nodiscard]] bool decodeLegacyPayload(const LegacyPayload &payload, domain::Configuration &configuration) noexcept
+{
+	ByteReader reader{payload};
+	configuration = {};
+	if (reader.readU16() != legacyConfigurationSchemaVersion)
+	{
+		return false;
+	}
+	configuration.schemaVersion = domain::currentConfigurationSchemaVersion;
+	configuration.generation = reader.readU32();
+	reader.readArray(configuration.boardModel);
+	reader.readArray(configuration.hardwareRevision);
+	reader.readArray(configuration.deviceSerial);
+	reader.readArray(configuration.deviceUuid);
+	configuration.modbus.unitId = reader.readU8();
+	configuration.modbus.baudRate = reader.readU32();
+	configuration.modbus.parity = static_cast<domain::SerialParity>(reader.readU8());
+	configuration.modbus.dataBits = reader.readU8();
+	configuration.modbus.stopBits = reader.readU8();
+	for (auto &channel : configuration.relayChannels)
+	{
+		const auto enabled = reader.readU8();
+		if (enabled > 1)
+		{
+			return false;
+		}
+		channel.enabled = enabled != 0;
+		channel.restorePolicy = static_cast<domain::RestorePolicy>(reader.readU8());
+		channel.configuredDefault = static_cast<domain::RelayState>(reader.readU8());
+	}
+	const auto knxEnabled = reader.readU8();
+	if (knxEnabled > 1)
+	{
+		return false;
+	}
+	configuration.knx.enabled = knxEnabled != 0;
+	configuration.knx.individualAddress = reader.readU16();
+	for (auto &channel : configuration.knx.channels)
+	{
+		channel.switchGroupAddress = reader.readU16();
+	}
+	for (auto &channel : configuration.knx.channels)
+	{
+		channel.statusGroupAddress = reader.readU16();
 	}
 	const auto webEnabled = reader.readU8();
 	const auto securityProvisioned = reader.readU8();
@@ -272,21 +376,35 @@ void writeU32(Record &record, const std::size_t offset, const std::uint32_t valu
 	return true;
 }
 
-[[nodiscard]] bool decodeRecord(const Record &record, domain::Configuration &configuration) noexcept
+[[nodiscard]] bool decodeRecord(const Record &record,
+								const std::size_t recordLength,
+								domain::Configuration &configuration) noexcept
 {
-	if (readU32(record, 0) != recordMagic || readU16(record, 4) != domain::currentConfigurationSchemaVersion ||
-		readU16(record, 6) != configurationPayloadSize)
+	if (readU32(record, 0) != recordMagic || recordLength < recordHeaderSize)
 	{
 		return false;
 	}
-
-	Payload payload{};
-	std::copy(record.begin() + recordHeaderSize, record.end(), payload.begin());
-	if (crc32(payload) != readU32(record, 12) || !decodePayload(payload, configuration))
+	const auto schemaVersion = readU16(record, 4);
+	const auto payloadLength = readU16(record, 6);
+	if (recordLength != recordHeaderSize + payloadLength)
 	{
 		return false;
 	}
-	return configuration.schemaVersion == readU16(record, 4) && configuration.generation == readU32(record, 8);
+	if (schemaVersion == domain::currentConfigurationSchemaVersion && payloadLength == configurationPayloadSize)
+	{
+		Payload payload{};
+		std::copy_n(record.begin() + recordHeaderSize, payload.size(), payload.begin());
+		return crc32(payload) == readU32(record, 12) && decodePayload(payload, configuration) &&
+			configuration.generation == readU32(record, 8);
+	}
+	if (schemaVersion == legacyConfigurationSchemaVersion && payloadLength == legacyConfigurationPayloadSize)
+	{
+		LegacyPayload payload{};
+		std::copy_n(record.begin() + recordHeaderSize, payload.size(), payload.begin());
+		return crc32(payload) == readU32(record, 12) && decodeLegacyPayload(payload, configuration) &&
+			configuration.generation == readU32(record, 8);
+	}
+	return false;
 }
 
 [[nodiscard]] const char *slotKey(const std::uint8_t slot) noexcept
@@ -303,13 +421,15 @@ void writeU32(Record &record, const std::size_t offset, const std::uint32_t valu
 	{
 		return result;
 	}
-	if (storedLength != result.encoded.size() || preferences.getBytes(key, result.encoded.data(), result.encoded.size()) != result.encoded.size())
+	if ((storedLength != legacyConfigurationRecordSize && storedLength != configurationRecordSize) ||
+		preferences.getBytes(key, result.encoded.data(), storedLength) != storedLength)
 	{
 		result.state = SlotState::Corrupt;
 		return result;
 	}
 
-	result.state = decodeRecord(result.encoded, result.configuration) ? SlotState::Valid : SlotState::Corrupt;
+	result.encodedLength = storedLength;
+	result.state = decodeRecord(result.encoded, storedLength, result.configuration) ? SlotState::Valid : SlotState::Corrupt;
 	return result;
 }
 }
