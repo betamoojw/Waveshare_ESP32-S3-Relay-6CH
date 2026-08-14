@@ -14,11 +14,15 @@ AllowAllParametersOfDeclarationOnNextLine: false
 AllowShortBlocksOnASingleLine: false
 AllowShortCaseLabelsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: None
+AllowShortLambdasOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 AlwaysBreakAfterReturnType: None
 AlwaysBreakBeforeMultilineStrings: false
 BreakBeforeBraces: Allman
+BreakConstructorInitializers: AfterColon
+ConstructorInitializerIndentWidth: 4
+PackConstructorInitializers: Never
 BreakTemplateDeclarations: Yes
 ContinuationIndentWidth: 4
 ColumnLimit: 140
@@ -47,5 +51,7 @@ SpacesInParentheses: false
 SpacesInSquareBrackets: false
 TabWidth: 4
 UseTab: Never
- 
- 
+IndentExternBlock: NoIndent
+Cpp11BracedListStyle: false
+BinPackArguments: false
+BinPackParameters: false
