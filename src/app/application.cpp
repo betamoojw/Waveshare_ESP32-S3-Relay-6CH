@@ -1,0 +1,1 @@
+// Application composition will be implemented during the architecture migration.

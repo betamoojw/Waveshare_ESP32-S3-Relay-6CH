@@ -1,0 +1,1 @@
+#include "null_knx_adapter.h"
