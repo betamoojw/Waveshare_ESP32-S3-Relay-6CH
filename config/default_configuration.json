@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "identity": {
+    "boardModel": "Waveshare-ESP32S3-Relay6CH",
+    "hardwareRevision": "1.0",
+    "deviceSerial": "UNPROVISIONED-0001",
+    "deviceUuid": "00000000-0000-0000-0000-000000000001"
+  },
+  "modbus": {
+    "unitId": 10,
+    "baudRate": 115200,
+    "parity": "none",
+    "dataBits": 8,
+    "stopBits": 1
+  },
+  "relayChannels": [
+    { "enabled": true, "restorePolicy": "allOff", "configuredDefault": "off" },
+    { "enabled": true, "restorePolicy": "allOff", "configuredDefault": "off" },
+    { "enabled": true, "restorePolicy": "allOff", "configuredDefault": "off" },
+    { "enabled": true, "restorePolicy": "allOff", "configuredDefault": "off" },
+    { "enabled": true, "restorePolicy": "allOff", "configuredDefault": "off" },
+    { "enabled": true, "restorePolicy": "allOff", "configuredDefault": "off" }
+  ],
+  "knx": {
+    "enabled": false,
+    "individualAddress": 0,
+    "switchGroupAddresses": [0, 0, 0, 0, 0, 0],
+    "statusGroupAddresses": [0, 0, 0, 0, 0, 0]
+  },
+  "web": {
+    "enabled": false,
+    "securityProvisioned": false
+  },
+  "indicators": {
+    "maximumBrightness": 96,
+    "maximumBuzzerDutyPercent": 10
+  }
+}

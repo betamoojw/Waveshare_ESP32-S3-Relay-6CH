@@ -57,6 +57,14 @@ If you want to test the build on all merge w/o creating a tag then the `build` w
 
 [PlatformIO](https://platformio.org/) is a tool to create microcontroller apps for arduino platforms and compatibles (esp32). You can install the [Visual Studio Code extension](https://platformio.org/install/ide?install=vscode) in the [Visual Studio Code](https://code.visualstudio.com/) IDE.
 
+## Default Configuration
+
+Deployment defaults live in [config/default_configuration.json](config/default_configuration.json). PlatformIO embeds this file in the firmware; a separate filesystem upload is not required.
+
+At boot, a valid NVS configuration takes precedence. If NVS has no valid generation, firmware parses and validates the embedded JSON. If both sources are invalid, firmware applies safe domain defaults and keeps relay restoration disabled. NVS corruption or I/O failure remains a degraded-state fault even when JSON fallback succeeds.
+
+The JSON document is versioned and defines device identity, Modbus serial settings, all six relay policies, KNX bindings, web/security flags, and indicator limits. Array lengths and value types are strict. Replace the development serial number and UUID with deployment-specific provisioned values before a production build; do not place secrets in this file.
+
 ## Python
 
 There is a tiny python script needed to customize the firmware filenames within platformio, see documentation: https://docs.platformio.org/en/stable/scripting/examples/custom_program_name.html

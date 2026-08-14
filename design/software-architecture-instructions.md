@@ -243,11 +243,12 @@ Boot proceeds in this order:
 4. Initialize status LED and show boot state without blocking.
 5. Open NVS and load both configuration slots.
 6. Validate schema version, length, range, and CRC; select the newest valid generation.
-7. If configuration is invalid, load safe defaults, keep relays off, and expose a configuration fault.
-8. Construct domain services and initialize the command queue.
-9. Initialize Modbus, optional KNX/network adapters, CLI, and button input.
-10. Apply restore policy through `RelayCommandService`, never by direct GPIO writes.
-11. Enter operational state and enable the watchdog.
+7. If NVS has no valid configuration, parse the embedded `config/default_configuration.json` through the JSON configuration adapter and validate the resulting domain value.
+8. If neither NVS nor JSON provides a valid configuration, load safe defaults, keep relays off, and expose a configuration fault.
+9. Construct domain services and initialize the command queue.
+10. Initialize Modbus, optional KNX/network adapters, CLI, and button input.
+11. Apply restore policy through `RelayCommandService`, never by direct GPIO writes.
+12. Enter operational state and enable the watchdog.
 
 On brownout, watchdog reset, panic, invalid configuration, or repeated boot failure, the default behavior is all relays off. Restoring `LastKnown` after an abnormal reset MUST be an explicit deploy-time option and SHOULD default to disabled.
 
@@ -272,13 +273,19 @@ The NVS adapter MUST use two records (A/B) with generation, payload length, sche
 
 Configuration changes follow `validate -> stage -> persist -> apply`. Changes that alter an active transport MAY respond successfully only after persistence succeeds and MUST state whether a controlled restart is required. Invalid configuration MUST never partially apply.
 
+The repository-level `config/default_configuration.json` is the data-driven source for deployment defaults. PlatformIO MUST embed it as an immutable text resource so normal firmware flashing does not depend on a separately uploaded filesystem image. The JSON adapter MUST reject malformed JSON, missing or incorrectly typed required fields, wrong fixed-array lengths, out-of-range text, invalid UUID syntax, and any value rejected by domain validation. Parsing MUST be failure-atomic: the active configuration changes only after the complete document is accepted.
+
+Configuration precedence is `valid NVS generation -> valid embedded JSON -> safe domain defaults`. An empty NVS store on first boot is normal when JSON is valid. Corrupt or inaccessible NVS MUST still raise a persistence fault and degraded lifecycle state even when JSON fallback permits operation. Factory reset erases NVS, locks relays off, and restarts; the next boot therefore reloads the embedded JSON defaults. Production builds MUST replace development placeholder identity values in the JSON file with deployment-specific provisioning data and MUST NOT embed secrets.
+
 Relay state persistence MUST be wear-aware. Coalesce changes, rate-limit writes, and store a compact bitmask plus generation and CRC. Safety-critical installations SHOULD use `AllOff` restore policy instead of frequent last-state persistence.
 
 ## 11. Modbus RTU Adapter
 
 ### 11.1 Transport
 
-The device is a Modbus RTU server/slave. Defaults are unit ID 10 and 115200 8N1 only for development compatibility; production defaults MUST be documented and configurable. Valid unit IDs are 1 through 247. Address 0 is broadcast and MUST NOT generate a response.
+The device defaults to the Modbus RTU server role and MAY switch dynamically between server and client roles through an authorized maintenance CLI command. Role changes are runtime-only, MUST NOT reconfigure the UART, and MUST NOT require a restart. Returning to server role MUST restore the configured unit ID and register callbacks. Defaults are unit ID 10 and 115200 8N1 only for development compatibility; production defaults MUST be documented and configurable. Valid unit IDs are 1 through 247. Address 0 is broadcast and MUST NOT generate a response.
+
+Client transactions MUST be explicitly initiated through a typed control port; application and CLI code MUST NOT depend directly on NanoModbus. Client requests MUST use bounded buffers and bounded response timeouts. The maintenance CLI supports holding-register reads of 1 through 20 registers and single-register writes to destinations 1 through 247. Client transactions and role changes MUST require maintenance authorization when mutating CLI commands are enabled.
 
 RTU framing and inter-frame timing MUST follow the configured baud rate. Byte/read timeouts MUST be derived from character time and frame limits; fixed one-second blocking reads are prohibited. The adapter MUST count CRC errors, malformed frames, illegal function/address/value requests, timeouts, queue saturation, and valid requests.
 

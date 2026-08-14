@@ -43,7 +43,10 @@ Readability, maintainability, lower coupling, duplication removal, long-function
 
 ## Switch Actuator
 
-Switch Actuator is C++ firmware for ESP32/ESP8266 microcontrollers controlling relays via knx/modbus protocol, with a web UI (HTML/JS/CSS). Built with PlatformIO (Arduino framework) and Node.js tooling.
+Switch Actuator is C++ firmware for ESP32/ESP8266 microcontrollers controlling relays via knx/modbus rtu protocol, with a web UI (HTML/JS/CSS). Built with PlatformIO (Arduino framework) and Node.js tooling.
+Note: 
+  1. modbus rtu could run in client and server by dynamical switching via cli, webui
+  2. use json file as data-driven
 
 ## Hardware Platform Info
 
@@ -86,4 +89,4 @@ Check: `design/software-architecture-instructions.md`,
 
 ## Front-end Web UI 
 
-Check: `design/fontend-instructions`,
+Check: `design/fontend-instructions`

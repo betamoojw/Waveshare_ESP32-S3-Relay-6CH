@@ -1,11 +1,22 @@
-#include "Controller.h"
+#include "app/application.h"
+
+#include <Arduino.h>
+
+namespace
+{
+switch_actuator::app::Application &application() noexcept
+{
+    static switch_actuator::app::Application instance{};
+    return instance;
+}
+}
 
 void setup()
 {
-    controller.setup();
+    static_cast<void>(application().initialize(millis()));
 }
 
 void loop()
 {
-    controller.loop();
+    application().update(millis());
 }
