@@ -14,6 +14,29 @@ Mutating commands require all of the following:
 
 The adapter responds with `error=not-authorized` or `error=maintenance-authorization-required` when this gate is not satisfied. Maintenance authorization is cleared at CLI initialization and during factory reset.
 
+## Configuration Files
+
+```text
+load-config
+store-config
+```
+
+Both commands are maintenance-only. `load-config` reads only the primary
+seven-file `/config/` bundle, validates the complete assembled configuration,
+and commits it through `ConfigurationService` and the NVS A/B store. It does not
+silently load the filesystem backup or embedded fallback. The response reports
+whether a controlled restart is required.
+
+`store-config` serializes the current validated active configuration into
+`/config/.staging/`, reloads and validates that bundle, preserves the current
+valid primary as `/config/.backup/`, and then promotes the staged files. Normal
+CLI setters continue to commit NVS only; run `store-config` explicitly when the
+new active values must become filesystem deployment defaults.
+
+The Wi-Fi file contains configured SSIDs and passphrases in plaintext because
+LittleFS does not provide encryption. The web adapter must never expose
+`/config/`, and physical flash access remains able to recover these values.
+
 ## Device And Relay Commands
 
 ```text

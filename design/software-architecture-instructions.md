@@ -50,7 +50,8 @@ flowchart LR
 		Device[Switch Actuator firmware] --> Relays[6 relay outputs]
 		Device --> Led[WS2812 status LED]
 		Device --> Buzzer[Passive buzzer]
-		Device --> Storage[NVS configuration/state]
+		Device --> Storage[NVS mutable configuration/state]
+		Device --> FileSystem[LittleFS deployment defaults/assets]
 ```
 
 Modbus, KNX, web, CLI, and button inputs are untrusted command sources. No input source may drive GPIO directly. Every request MUST pass through validation, authorization where applicable, command arbitration, and the relay application service.
@@ -281,14 +282,15 @@ Boot proceeds in this order:
 2. Select and validate the compile-time board descriptor.
 3. Drive all relay channels to the inactive state.
 4. Initialize status LED and show boot state without blocking.
-5. Open NVS and load both configuration slots.
-6. Validate schema version, length, range, and CRC; select the newest valid generation.
-7. If NVS has no valid configuration, parse the embedded `config/default_configuration.json` through the JSON configuration adapter and validate the resulting domain value.
-8. If neither NVS nor JSON provides a valid configuration, load safe defaults, keep relays off, and expose a configuration fault.
-9. Construct domain services and initialize the command queue.
-10. Initialize Modbus, optional KNX/network adapters, CLI, and button input.
-11. Apply restore policy through `RelayCommandService`, never by direct GPIO writes.
-12. Enter operational state and enable the watchdog.
+5. Mount LittleFS once without automatic formatting; record a filesystem fault on failure.
+6. Open NVS and load both configuration slots.
+7. Validate schema version, length, range, and CRC; select the newest valid generation.
+8. If NVS has no valid configuration, try the validated seven-file LittleFS `/config/` bundle, its complete `/config/.backup/` bundle, and embedded `config/default_configuration.json`, in that order.
+9. If no JSON source provides a valid configuration, load safe defaults, keep relays off, and expose a configuration fault.
+10. Construct domain services and initialize the command queue.
+11. Initialize Modbus, optional KNX/network adapters, CLI, and button input.
+12. Apply restore policy through `RelayCommandService`, never by direct GPIO writes.
+13. Enter operational state and enable the watchdog.
 
 On brownout, watchdog reset, panic, invalid configuration, or repeated boot failure, the default behavior is all relays off. Restoring `LastKnown` after an abnormal reset MUST be an explicit deploy-time option and SHOULD default to disabled.
 
@@ -313,9 +315,9 @@ The NVS adapter MUST use two records (A/B) with generation, payload length, sche
 
 Configuration changes follow `validate -> stage -> persist -> apply`. Changes that alter an active transport MAY respond successfully only after persistence succeeds and MUST state whether a controlled restart is required. Invalid configuration MUST never partially apply.
 
-The repository-level `config/default_configuration.json` is the data-driven source for deployment defaults. PlatformIO MUST embed it as an immutable text resource so normal firmware flashing does not depend on a separately uploaded filesystem image. The JSON adapter MUST reject malformed JSON, missing or incorrectly typed required fields, wrong fixed-array lengths, out-of-range text, invalid UUID syntax, and any value rejected by domain validation. Parsing MUST be failure-atomic: the active configuration changes only after the complete document is accepted.
+The repository-level `data/config/` directory is the data-driven deployment source and MUST contain `system.json`, `network.json`, `wifi.json`, `ethernet.json`, `knx.json`, `modbus.json`, and `ui.json`. PlatformIO packages these paths into LittleFS. The repository-level `config/default_configuration.json` MUST remain embedded as an immutable recovery fallback so normal firmware flashing does not depend on a separately uploaded filesystem image. The filesystem adapter MUST reject a missing section, malformed JSON, incorrectly typed required fields, wrong fixed-array lengths, unsupported Ethernet enablement, out-of-range text, invalid UUID syntax, oversized section, and any value rejected by domain validation. Assembly and parsing MUST be failure-atomic: active configuration changes only after the complete seven-file bundle is accepted.
 
-Configuration precedence is `valid NVS generation -> valid embedded JSON -> safe domain defaults`. An empty NVS store on first boot is normal when JSON is valid. Corrupt or inaccessible NVS MUST still raise a persistence fault and degraded lifecycle state even when JSON fallback permits operation. Factory reset erases NVS, locks relays off, and restarts; the next boot therefore reloads the embedded JSON defaults. Production builds MUST replace development placeholder identity values in the JSON file with deployment-specific provisioning data and MUST NOT embed secrets.
+Configuration precedence is `valid NVS generation -> valid LittleFS /config bundle -> valid LittleFS backup bundle -> valid embedded JSON -> safe domain defaults`. An empty NVS store on first boot is normal when JSON is valid. Corrupt or inaccessible NVS MUST still raise a persistence fault and degraded lifecycle state even when JSON fallback permits operation. LittleFS mount failure MUST NOT auto-format storage; it raises a filesystem fault and uses the embedded fallback. Factory reset erases NVS, locks relays off, and restarts; it preserves deployment defaults in LittleFS. Production bundles MUST replace development placeholder identity values with deployment-specific provisioning data and MUST NOT store secrets in filesystem configuration. Detailed ownership, recovery, and web-serving rules are defined in `design/filesystem-architecture.md`.
 
 Relay state persistence MUST be wear-aware. Coalesce changes, rate-limit writes, and store a compact bitmask plus generation and CRC. Safety-critical installations SHOULD use `AllOff` restore policy instead of frequent last-state persistence.
 
@@ -517,6 +519,7 @@ src/
 			null_knx_adapter.*
 		cli/
 		web/
+		filesystem/
 		nvs/
 		indicators/
 	main.cpp

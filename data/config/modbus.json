@@ -1,0 +1,7 @@
+{
+  "unitId": 10,
+  "baudRate": 115200,
+  "parity": "none",
+  "dataBits": 8,
+  "stopBits": 1
+}

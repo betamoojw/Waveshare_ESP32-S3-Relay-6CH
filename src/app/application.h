@@ -13,6 +13,7 @@
 #include "../adapters/button/button_adapter.h"
 #include "../adapters/cli/cli_adapter.h"
 #include "../adapters/configuration/json_configuration_source.h"
+#include "../adapters/filesystem/littlefs_configuration_source.h"
 #include "../adapters/indicators/status_indicator.h"
 #include "../adapters/knx/knx_adapter.h"
 #include "../adapters/modbus/esp32_modbus_serial_transport.h"
@@ -76,7 +77,7 @@ private:
 	SceneService sceneService_;
 	RelayTimerService relayTimerService_;
 	adapters::nvs::NvsSettingsStore settingsStore_{};
-	adapters::configuration::JsonConfigurationSource defaultConfigurationSource_;
+	adapters::filesystem::LittleFsConfigurationSource defaultConfigurationSource_;
 	ConfigurationService configurationService_;
 	adapters::network::NetworkManager network_{adapters::bsp::waveshareEsp32S3Relay6Ch, configurationService_, Serial};
 	adapters::indicators::StatusIndicator statusIndicator_;

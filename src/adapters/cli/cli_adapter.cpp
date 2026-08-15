@@ -268,7 +268,7 @@ CliInitializeResult CliAdapter::initialize() noexcept
 	cli_->appContext = this;
 	cli_->writeChar = writeCharacter;
 	cli_->onCommand = unknownCommand;
-	const std::array<CliCommandBinding, 20> bindings{{
+	const std::array<CliCommandBinding, 22> bindings{{
 		{"version", "Firmware and CLI version", true, this, versionCommand},
 		{"status", "Machine-readable device status", true, this, statusCommand},
 		{"get-relay", "get-relay [all|0..5]", true, this, getRelayCommand},
@@ -288,6 +288,8 @@ CliInitializeResult CliAdapter::initialize() noexcept
 		{"set-knx", "set-knx [parameter] [value]", true, this, setKnxCommand},
 		{"set-knx-channel", "set-knx-channel [0..5] [parameter] [value]", true, this, setKnxChannelCommand},
 		{"set-wifi", "set-wifi [profile_0..2] [ssid] [passphrase]", true, this, setWifiCommand},
+		{"load-config", "Load /config JSON files into validated active configuration", true, this, loadConfigCommand},
+		{"store-config", "Store active configuration into /config JSON files", true, this, storeConfigCommand},
 		{"reboot", "Request a controlled restart", true, this, rebootCommand},
 	}};
 	for (const auto &binding : bindings)
@@ -495,6 +497,16 @@ void CliAdapter::setWifiCommand(EmbeddedCli *, char *const arguments, void *cons
 	static_cast<CliAdapter *>(context)->handleSetWifi(arguments);
 }
 
+void CliAdapter::loadConfigCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleLoadConfig(arguments);
+}
+
+void CliAdapter::storeConfigCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleStoreConfig(arguments);
+}
+
 void CliAdapter::rebootCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
 {
 	static_cast<CliAdapter *>(context)->handleReboot(arguments);
@@ -504,7 +516,8 @@ bool CliAdapter::dependenciesValid() const noexcept
 {
 	return dependencies_.stream != nullptr && dependencies_.switchingPolicy != nullptr && dependencies_.relayService != nullptr &&
 		   dependencies_.lifecycleSupervisor != nullptr && dependencies_.diagnostics != nullptr &&
-		   dependencies_.configurationService != nullptr && dependencies_.statusIndicator != nullptr &&
+		   dependencies_.configurationService != nullptr && dependencies_.configurationFile.isValid() &&
+		   dependencies_.statusIndicator != nullptr &&
 		   dependencies_.button != nullptr && dependencies_.networkManager != nullptr && dependencies_.modbus.isValid() &&
 		   dependencies_.clock.isValid();
 }
@@ -906,7 +919,7 @@ void CliAdapter::handleSetModbusConfig(char *const arguments) noexcept
 	configuration.modbus.dataBits = 8;
 	configuration.modbus.parity = parity;
 	configuration.modbus.stopBits = stopBits;
-	commitKnxConfiguration(configuration);
+	commitConfiguration(configuration);
 }
 
 void CliAdapter::handleModbusReadHolding(char *const arguments) noexcept
@@ -1113,7 +1126,7 @@ void CliAdapter::handleSetKnx(char *const arguments) noexcept
 		print("ok=false error=invalid-value");
 		return;
 	}
-	commitKnxConfiguration(configuration);
+	commitConfiguration(configuration);
 }
 
 void CliAdapter::handleSetKnxChannel(char *const arguments) noexcept
@@ -1191,7 +1204,7 @@ void CliAdapter::handleSetKnxChannel(char *const arguments) noexcept
 		print("ok=false error=invalid-value");
 		return;
 	}
-	commitKnxConfiguration(configuration);
+	commitConfiguration(configuration);
 }
 
 void CliAdapter::handleSetWifi(char *const arguments) noexcept
@@ -1224,7 +1237,65 @@ void CliAdapter::handleSetWifi(char *const arguments) noexcept
 	print(response);
 }
 
-void CliAdapter::commitKnxConfiguration(const domain::Configuration &configuration) noexcept
+void CliAdapter::handleLoadConfig(char *const arguments) noexcept
+{
+	if (!mutatingCommandAllowed())
+	{
+		print("ok=false error=maintenance-authorization-required");
+		return;
+	}
+	if (!hasNoArguments(arguments))
+	{
+		print("ok=false error=unexpected-argument");
+		return;
+	}
+	domain::Configuration configuration{};
+	const auto result = dependencies_.configurationFile.load(configuration);
+	if (result == ports::ConfigurationSourceResult::Unavailable)
+	{
+		print("ok=false error=config-files-unavailable");
+		return;
+	}
+	if (result != ports::ConfigurationSourceResult::Loaded)
+	{
+		print("ok=false error=invalid-config-files");
+		return;
+	}
+	commitConfiguration(configuration);
+}
+
+void CliAdapter::handleStoreConfig(char *const arguments) noexcept
+{
+	if (!mutatingCommandAllowed())
+	{
+		print("ok=false error=maintenance-authorization-required");
+		return;
+	}
+	if (!hasNoArguments(arguments))
+	{
+		print("ok=false error=unexpected-argument");
+		return;
+	}
+	const auto result = dependencies_.configurationFile.store(dependencies_.configurationService->active());
+	if (result == ports::ConfigurationFileStoreResult::Stored)
+	{
+		print("ok=true result=config-files-stored");
+		return;
+	}
+	if (result == ports::ConfigurationFileStoreResult::Unavailable)
+	{
+		print("ok=false error=config-files-unavailable");
+		return;
+	}
+	if (result == ports::ConfigurationFileStoreResult::InvalidConfiguration)
+	{
+		print("ok=false error=invalid-configuration");
+		return;
+	}
+	print("ok=false error=config-files-io-failure");
+}
+
+void CliAdapter::commitConfiguration(const domain::Configuration &configuration) noexcept
 {
 	dependencies_.configurationService->discardStaged();
 	if (dependencies_.configurationService->stage(configuration) != app::ConfigurationStageResult::Staged)

@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "hostName": "relay-actuator",
+  "recoveryAp": {
+    "enabled": true,
+    "ssidPrefix": "Relay",
+    "channel": 1,
+    "timeoutMs": 0,
+    "remainActiveWhileOffline": true
+  }
+}

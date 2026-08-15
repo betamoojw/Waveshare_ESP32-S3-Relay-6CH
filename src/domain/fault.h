@@ -23,6 +23,7 @@ enum class FaultCode : std::uint8_t
 	PanicReset,
 	RepeatedBoot,
 	ResourceExhaustion,
+	FileSystemFailure,
 	Count
 };
 

@@ -237,6 +237,51 @@ template <std::size_t Capacity>
 	return value.isNull() || readText(value, output);
 }
 
+[[nodiscard]] bool readIpv4Address(const JsonVariantConst value, std::array<std::uint8_t, 4> &output) noexcept
+{
+	if (!value.is<JsonArrayConst>() || value.size() != output.size())
+	{
+		return false;
+	}
+	for (std::size_t index = 0; index < output.size(); ++index)
+	{
+		if (!value[index].is<std::uint8_t>())
+		{
+			return false;
+		}
+		output[index] = value[index].as<std::uint8_t>();
+	}
+	return true;
+}
+
+[[nodiscard]] bool readIpv4Configuration(const JsonVariantConst value, domain::Ipv4Configuration &output) noexcept
+{
+	if (value.isNull())
+	{
+		return true;
+	}
+	if (!value.is<JsonObjectConst>() || !value["mode"].is<const char *>())
+	{
+		return false;
+	}
+	const auto *const mode = value["mode"].as<const char *>();
+	if (std::strcmp(mode, "dhcp") == 0)
+	{
+		output.mode = domain::IpMode::Dhcp;
+	}
+	else if (std::strcmp(mode, "static") == 0)
+	{
+		output.mode = domain::IpMode::Static;
+	}
+	else
+	{
+		return false;
+	}
+	return readIpv4Address(value["address"], output.address) &&
+		readIpv4Address(value["subnetMask"], output.subnetMask) &&
+		readIpv4Address(value["gateway"], output.gateway) && readIpv4Address(value["dns"], output.dns);
+}
+
 [[nodiscard]] bool readNetworkConfiguration(const JsonObjectConst root, domain::NetworkConfiguration &network) noexcept
 {
 	const auto value = root["network"];
@@ -263,7 +308,8 @@ template <std::size_t Capacity>
 		const auto source = profiles[index];
 		auto &target = network.wifiProfiles[index];
 		if (!source.is<JsonObjectConst>() || !source["enabled"].is<bool>() ||
-			!readOptionalText(source["ssid"], target.ssid) || !readOptionalText(source["passphrase"], target.passphrase))
+			!readOptionalText(source["ssid"], target.ssid) || !readOptionalText(source["passphrase"], target.passphrase) ||
+			!readIpv4Configuration(source["ipv4"], target.ipv4))
 		{
 			return false;
 		}

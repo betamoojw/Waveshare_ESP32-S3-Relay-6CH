@@ -1,0 +1,21 @@
+{
+  "enabled": false,
+  "individualAddress": 0,
+  "startupTransmitDelayMs": 3000,
+  "minimumTelegramIntervalMs": 100,
+  "cyclicStatusIntervalMs": 0,
+  "heartbeatIntervalMs": 0,
+  "readSwitchObject": false,
+  "heartbeatGroupAddress": 0,
+  "centralSwitchGroupAddress": 0,
+  "centralOffGroupAddress": 0,
+  "deviceFaultGroupAddress": 0,
+  "channels": [
+    { "switchGroupAddress": 0, "statusGroupAddress": 0, "faultGroupAddress": 0, "commandPolarityInverted": false, "statusPolarityInverted": false, "sendStatusAfterStartup": true, "participatesInCentralSwitch": true, "participatesInCentralOff": true },
+    { "switchGroupAddress": 0, "statusGroupAddress": 0, "faultGroupAddress": 0, "commandPolarityInverted": false, "statusPolarityInverted": false, "sendStatusAfterStartup": true, "participatesInCentralSwitch": true, "participatesInCentralOff": true },
+    { "switchGroupAddress": 0, "statusGroupAddress": 0, "faultGroupAddress": 0, "commandPolarityInverted": false, "statusPolarityInverted": false, "sendStatusAfterStartup": true, "participatesInCentralSwitch": true, "participatesInCentralOff": true },
+    { "switchGroupAddress": 0, "statusGroupAddress": 0, "faultGroupAddress": 0, "commandPolarityInverted": false, "statusPolarityInverted": false, "sendStatusAfterStartup": true, "participatesInCentralSwitch": true, "participatesInCentralOff": true },
+    { "switchGroupAddress": 0, "statusGroupAddress": 0, "faultGroupAddress": 0, "commandPolarityInverted": false, "statusPolarityInverted": false, "sendStatusAfterStartup": true, "participatesInCentralSwitch": true, "participatesInCentralOff": true },
+    { "switchGroupAddress": 0, "statusGroupAddress": 0, "faultGroupAddress": 0, "commandPolarityInverted": false, "statusPolarityInverted": false, "sendStatusAfterStartup": true, "participatesInCentralSwitch": true, "participatesInCentralOff": true }
+  ]
+}

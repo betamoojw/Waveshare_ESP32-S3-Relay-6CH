@@ -46,8 +46,19 @@ Readability, maintainability, lower coupling, duplication removal, long-function
 Switch Actuator is C++ firmware for ESP32/ESP8266 microcontrollers controlling relays via KNX IP/Modbus RTU protocol, with a web UI (HTML/JS/CSS). Built with PlatformIO (Arduino framework) and Node.js tooling.
 Note: 
   1. modbus rtu could run in client and server by dynamical switching via cli, webui
-  2. use json file as data-driven
-
+  2. use JSON files on LittleFS as the project's data-driven deployment configuration
+```text
+  /config/
+    system.json
+    network.json
+    wifi.json
+    ethernet.json
+    knx.json
+    modbus.json
+    ui.json
+```
+  The repository sources these files from `data/config/`. Runtime configuration
+  precedence and recovery rules are defined in `design/filesystem-architecture.md`.
 
 
 ## Hardware Platform Info

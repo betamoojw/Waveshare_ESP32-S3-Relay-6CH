@@ -79,6 +79,7 @@ Application::Application() noexcept
 		&lifecycle_,
 		&diagnostics_,
 		&configurationService_,
+		defaultConfigurationSource_.filePort(),
 		&statusIndicator_,
 		&button_,
 		&network_,
@@ -127,6 +128,8 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 		return ApplicationInitializeResult::LifecycleFailure;
 	}
 
+	const auto fileSystemReady =
+		defaultConfigurationSource_.initialize() == adapters::filesystem::LittleFsInitializeResult::Initialized;
 	const auto nvsReady = settingsStore_.initialize() == adapters::nvs::NvsInitializeResult::Initialized;
 	configurationService_.setDefaultSource(defaultConfigurationSource_.port());
 	static_cast<void>(configurationService_.initialize());
@@ -153,6 +156,16 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	else
 	{
 		static_cast<void>(diagnostics_.clearFault(domain::FaultCode::SettingsLoadFailure));
+	}
+	if (!fileSystemReady)
+	{
+		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::FileSystemFailure,
+			domain::FaultSeverity::Warning,
+			nowMs));
+	}
+	else
+	{
+		static_cast<void>(diagnostics_.clearFault(domain::FaultCode::FileSystemFailure));
 	}
 
 	if (relayService_.initialize(nowMs) != RelayServiceInitializeResult::Initialized)
@@ -206,7 +219,7 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	lastIndicatorUpdateAtMs_ = nowMs;
 	lastDiagnosticsUpdateAtMs_ = nowMs;
 	initialized_ = true;
-	if (!configurationValid || !persistenceHealthy || !modbusAvailable_ || !cliAvailable_ ||
+	if (!configurationValid || !persistenceHealthy || !fileSystemReady || !modbusAvailable_ || !cliAvailable_ ||
 		knxResult == adapters::knx::KnxInitializeResult::Unavailable)
 	{
 		static_cast<void>(lifecycle_.enterDegraded(

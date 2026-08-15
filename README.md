@@ -59,11 +59,13 @@ If you want to test the build on all merge w/o creating a tag then the `build` w
 
 ## Default Configuration
 
-Deployment defaults live in [config/default_configuration.json](config/default_configuration.json). PlatformIO embeds this file in the firmware; a separate filesystem upload is not required.
+Data-driven deployment configuration lives in the seven JSON files under [data/config](data/config). PlatformIO packages that directory as LittleFS. [config/default_configuration.json](config/default_configuration.json) remains an embedded monolithic recovery fallback, so firmware can boot safely when LittleFS is blank or unavailable.
 
-At boot, a valid NVS configuration takes precedence. If NVS has no valid generation, firmware parses and validates the embedded JSON. If both sources are invalid, firmware applies safe domain defaults and keeps relay restoration disabled. NVS corruption or I/O failure remains a degraded-state fault even when JSON fallback succeeds.
+At boot, precedence is valid NVS, the complete `/config/*.json` bundle, the complete `/config/.backup/*.json` bundle, embedded JSON, then safe domain defaults. LittleFS mount failure does not trigger automatic formatting: firmware uses the embedded fallback, reports a filesystem fault, and remains degraded. NVS corruption or I/O failure likewise remains a degraded-state fault even when a JSON fallback succeeds. See [design/filesystem-architecture.md](design/filesystem-architecture.md) for section ownership, recovery, and security rules.
 
-The JSON document is versioned and defines device identity, Modbus serial settings, all six relay policies, KNX bindings, web/security flags, and indicator limits. Array lengths and value types are strict. Replace the development serial number and UUID with deployment-specific provisioned values before a production build; do not place secrets in this file.
+The bundle defines device identity, network and Wi-Fi behavior, Modbus serial settings, all six relay policies, KNX bindings, web/security flags, and indicator limits. Every file is required, each section is limited to 8192 bytes, and the assembled configuration is accepted only after complete schema and domain validation. Ethernet must remain disabled for the current board. Replace the development serial number and UUID with deployment-specific provisioned values before production; do not place secrets in these files.
+
+Build and upload the LittleFS configuration explicitly with `pio run -e ws_esp32-s3-relay-6ch -t buildfs` and `pio run -e ws_esp32-s3-relay-6ch -t uploadfs`. A normal firmware upload does not replace the filesystem image.
 
 ## Python
 
