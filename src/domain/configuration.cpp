@@ -83,6 +83,42 @@ template <std::size_t Capacity>
 	}
 	return true;
 }
+
+[[nodiscard]] bool isValidNetworkConfiguration(const NetworkConfiguration &configuration) noexcept
+{
+	const auto hasText = [](const auto &text) { return hasBoundedText(text); };
+	const auto hasAddress = [](const auto &address) {
+		return std::any_of(address.begin(), address.end(), [](const auto octet) { return octet != 0; });
+	};
+	if (!hasText(configuration.hostName) || !hasText(configuration.recoveryAp.ssidPrefix) ||
+		configuration.recoveryAp.channel == 0 || configuration.recoveryAp.channel > 13)
+	{
+		return false;
+	}
+	for (std::size_t index = 0; index < configuration.wifiProfiles.size(); ++index)
+	{
+		const auto &profile = configuration.wifiProfiles[index];
+		if (!profile.enabled)
+		{
+			continue;
+		}
+		if (!hasText(profile.ssid) || !hasText(profile.passphrase) ||
+			(profile.ipv4.mode != IpMode::Dhcp && profile.ipv4.mode != IpMode::Static) ||
+			(profile.ipv4.mode == IpMode::Static && (!hasAddress(profile.ipv4.address) ||
+				!hasAddress(profile.ipv4.subnetMask) || !hasAddress(profile.ipv4.gateway) || !hasAddress(profile.ipv4.dns))))
+		{
+			return false;
+		}
+		for (std::size_t candidate = index + 1; candidate < configuration.wifiProfiles.size(); ++candidate)
+		{
+			if (configuration.wifiProfiles[candidate].enabled && profile.ssid == configuration.wifiProfiles[candidate].ssid)
+			{
+				return false;
+			}
+		}
+	}
+	return true;
+}
 }
 
 ConfigurationValidationError validateConfiguration(const Configuration &configuration) noexcept
@@ -115,7 +151,7 @@ ConfigurationValidationError validateConfiguration(const Configuration &configur
 	{
 		return ConfigurationValidationError::UnsupportedBaudRate;
 	}
-	if (!isValid(configuration.modbus.parity) || (configuration.modbus.dataBits != 7 && configuration.modbus.dataBits != 8) ||
+	if (!isValid(configuration.modbus.parity) || configuration.modbus.dataBits != 8 ||
 		(configuration.modbus.stopBits != 1 && configuration.modbus.stopBits != 2))
 	{
 		return ConfigurationValidationError::InvalidSerialFormat;
@@ -136,6 +172,10 @@ ConfigurationValidationError validateConfiguration(const Configuration &configur
 		(configuration.knx.heartbeatIntervalMs != 0 && configuration.knx.heartbeatGroupAddress == 0))
 	{
 		return ConfigurationValidationError::InvalidKnxConfiguration;
+	}
+	if (!isValidNetworkConfiguration(configuration.network))
+	{
+		return ConfigurationValidationError::InvalidNetworkConfiguration;
 	}
 	if (configuration.web.enabled && !configuration.web.securityProvisioned)
 	{

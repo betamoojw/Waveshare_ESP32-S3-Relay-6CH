@@ -10,6 +10,7 @@
 #include "../../ports/modbus_rtu_control_port.h"
 #include "../button/button_adapter.h"
 #include "../indicators/status_indicator.h"
+#include "../network/network_manager.h"
 
 #include <Arduino.h>
 #include <embedded_cli.h>
@@ -45,6 +46,7 @@ struct CliDependencies final
 	app::ConfigurationService *configurationService{nullptr};
 	indicators::StatusIndicator *statusIndicator{nullptr};
 	const button::ButtonAdapter *button{nullptr};
+	network::NetworkManager *networkManager{nullptr};
 	ports::ModbusRtuControlPort modbus{};
 	ports::ClockPort clock{};
 	bool mutatingCommandsEnabled{false};
@@ -57,14 +59,14 @@ public:
 
 	[[nodiscard]] CliInitializeResult initialize() noexcept;
 	[[nodiscard]] CliPollResult poll() noexcept;
+	void ingest(std::uint8_t value) noexcept;
 	void setMaintenanceAuthorized(bool authorized) noexcept;
 	[[nodiscard]] bool isMaintenanceAuthorized() const noexcept;
 	[[nodiscard]] bool isInitialized() const noexcept;
 
 private:
 	static constexpr std::size_t bufferSize{4096};
-	static constexpr std::size_t maximumInputBytesPerPoll{64};
-	static constexpr std::uint16_t maximumBindings{18};
+	static constexpr std::uint16_t maximumBindings{21};
 
 	static void writeCharacter(EmbeddedCli *cli, char character) noexcept;
 	static void unknownCommand(EmbeddedCli *cli, CliCommand *command) noexcept;
@@ -79,11 +81,14 @@ private:
 	static void getButtonCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void getModbusRoleCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void setModbusRoleCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
+	static void getModbusConfigCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
+	static void setModbusConfigCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void modbusReadHoldingCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void modbusWriteRegisterCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void getKnxCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void setKnxCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void setKnxChannelCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
+	static void setWifiCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void rebootCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 
 	[[nodiscard]] bool dependenciesValid() const noexcept;
@@ -102,11 +107,14 @@ private:
 	void handleSetRgb(char *arguments) noexcept;
 	void handleBuzzer(char *arguments) noexcept;
 	void handleSetModbusRole(char *arguments) noexcept;
+	void handleGetModbusConfig(char *arguments) noexcept;
+	void handleSetModbusConfig(char *arguments) noexcept;
 	void handleModbusReadHolding(char *arguments) noexcept;
 	void handleModbusWriteRegister(char *arguments) noexcept;
 	void handleGetKnx(char *arguments) noexcept;
 	void handleSetKnx(char *arguments) noexcept;
 	void handleSetKnxChannel(char *arguments) noexcept;
+	void handleSetWifi(char *arguments) noexcept;
 	void commitKnxConfiguration(const domain::Configuration &configuration) noexcept;
 	void handleReboot(char *arguments) noexcept;
 

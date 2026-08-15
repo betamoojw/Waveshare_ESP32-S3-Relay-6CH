@@ -72,9 +72,6 @@ KnxInitializeResult KnxAdapter::initialize(const domain::KnxConfiguration &confi
 		::knx.callback_assign(callbackId, addressFromRaw(configuration_.centralOffGroupAddress));
 	}
 	::knx.physical_address_set(addressFromRaw(configuration_.individualAddress));
-	WiFi.mode(WIFI_STA);
-	WiFi.setAutoReconnect(true);
-	static_cast<void>(WiFi.begin());
 	initialized_ = true;
 	if (!startTransport(nowMs))
 	{
@@ -95,7 +92,7 @@ KnxPollResult KnxAdapter::poll() noexcept
 	}
 
 	const auto nowMs = dependencies_.clock.nowMs();
-	if (WiFi.status() != WL_CONNECTED)
+	if (!dependencies_.networkStatus.isOnline())
 	{
 		dependencies_.diagnostics->updateKnx(true, false);
 		if (transportStarted_)
@@ -124,7 +121,7 @@ bool KnxAdapter::isInitialized() const noexcept
 
 bool KnxAdapter::isBusOnline() const noexcept
 {
-	return enabled_ && transportStarted_ && WiFi.status() == WL_CONNECTED;
+	return enabled_ && transportStarted_ && dependencies_.networkStatus.isOnline();
 }
 
 void KnxAdapter::handleTelegram(const message_t &message, void *const context) noexcept
@@ -185,7 +182,7 @@ void KnxAdapter::onTelegram(const message_t &message) noexcept
 
 bool KnxAdapter::startTransport(const std::uint32_t nowMs) noexcept
 {
-	if (WiFi.status() != WL_CONNECTED)
+	if (!dependencies_.networkStatus.isOnline())
 	{
 		dependencies_.diagnostics->updateKnx(true, false);
 		static_cast<void>(dependencies_.diagnostics->recordFault(

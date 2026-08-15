@@ -5,6 +5,7 @@
 #include "../../app/switching_policy_service.h"
 #include "../../domain/configuration.h"
 #include "../../ports/clock_port.h"
+#include "../../ports/network_status_port.h"
 
 #include <esp-knx-ip.h>
 
@@ -35,6 +36,7 @@ struct KnxAdapterDependencies final
 	app::RelayCommandService *relayService;
 	app::DiagnosticsService *diagnostics;
 	ports::ClockPort clock;
+	ports::NetworkStatusPort networkStatus;
 };
 
 class KnxAdapter final

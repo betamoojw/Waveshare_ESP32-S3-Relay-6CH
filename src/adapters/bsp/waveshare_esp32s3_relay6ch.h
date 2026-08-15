@@ -16,5 +16,8 @@ inline constexpr BoardDescriptor waveshareEsp32S3Relay6Ch{
 	18,
 	21,
 	38,
+	true,
+	false,
+	EthernetImplementation::None,
 };
 }

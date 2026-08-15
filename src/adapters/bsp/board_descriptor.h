@@ -20,6 +20,8 @@ enum class ButtonPullMode : std::uint8_t
 	PullDown
 };
 
+enum class EthernetImplementation : std::uint8_t { None, InternalMacPhy, SpiController };
+
 struct BoardDescriptor final
 {
 	static constexpr std::size_t relayChannelCount{6};
@@ -35,6 +37,9 @@ struct BoardDescriptor final
 	std::uint8_t modbusRxPin;
 	std::uint8_t buzzerPin;
 	std::uint8_t rgbLedPin;
+	bool wifiSupported;
+	bool ethernetSupported;
+	EthernetImplementation ethernetImplementation;
 
 	[[nodiscard]] constexpr bool relayActiveLevel() const noexcept
 	{

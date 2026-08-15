@@ -138,6 +138,41 @@ void testEnqueuesTypedChannelCommand()
 	TEST_ASSERT_EQUAL_UINT32(1000, batch.commands[0].receivedAtMs);
 }
 
+void testRejectsDuplicateWifiProfiles()
+{
+	auto configuration = validConfiguration();
+	for (std::size_t index = 0; index < 2; ++index)
+	{
+		auto &profile = configuration.network.wifiProfiles[index];
+		profile.enabled = true;
+		setText(profile.ssid, "Workshop");
+		setText(profile.passphrase, "commissioning-key");
+	}
+	TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(ConfigurationValidationError::InvalidNetworkConfiguration),
+		static_cast<std::uint8_t>(switch_actuator::domain::validateConfiguration(configuration)));
+}
+
+void testRejectsIncompleteStaticWifiProfile()
+{
+	auto configuration = validConfiguration();
+	auto &profile = configuration.network.wifiProfiles[0];
+	profile.enabled = true;
+	setText(profile.ssid, "Workshop");
+	setText(profile.passphrase, "commissioning-key");
+	profile.ipv4.mode = switch_actuator::domain::IpMode::Static;
+	profile.ipv4.address = {192, 168, 1, 20};
+	TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(ConfigurationValidationError::InvalidNetworkConfiguration),
+		static_cast<std::uint8_t>(switch_actuator::domain::validateConfiguration(configuration)));
+}
+
+void testRejectsModbusSevenDataBits()
+{
+	auto configuration = validConfiguration();
+	configuration.modbus.dataBits = 7;
+	TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(ConfigurationValidationError::InvalidSerialFormat),
+		static_cast<std::uint8_t>(switch_actuator::domain::validateConfiguration(configuration)));
+}
+
 void testEnqueuesAtomicParticipantGroup()
 {
 	RelayCommandQueue queue{};
@@ -312,6 +347,9 @@ int main()
 	RUN_TEST(testRejectsHeartbeatWithoutAddress);
 	RUN_TEST(testRejectsAmbiguousCommandAddresses);
 	RUN_TEST(testRejectsOutputAddressCollidingWithCommand);
+	RUN_TEST(testRejectsDuplicateWifiProfiles);
+	RUN_TEST(testRejectsIncompleteStaticWifiProfile);
+	RUN_TEST(testRejectsModbusSevenDataBits);
 	RUN_TEST(testEnqueuesTypedChannelCommand);
 	RUN_TEST(testEnqueuesAtomicParticipantGroup);
 	RUN_TEST(testGroupWithoutParticipantsDoesNotQueue);

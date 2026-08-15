@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "identity": {
     "boardModel": "Waveshare-ESP32S3-Relay6CH",
     "hardwareRevision": "1.0",
@@ -41,6 +41,22 @@
       { "switchGroupAddress": 0, "statusGroupAddress": 0, "faultGroupAddress": 0, "commandPolarityInverted": false, "statusPolarityInverted": false, "sendStatusAfterStartup": true, "participatesInCentralSwitch": true, "participatesInCentralOff": true },
       { "switchGroupAddress": 0, "statusGroupAddress": 0, "faultGroupAddress": 0, "commandPolarityInverted": false, "statusPolarityInverted": false, "sendStatusAfterStartup": true, "participatesInCentralSwitch": true, "participatesInCentralOff": true }
     ]
+  },
+  "network": {
+    "enabled": true,
+    "hostName": "relay-actuator",
+    "wifiProfiles": [
+      { "enabled": false },
+      { "enabled": false },
+      { "enabled": false }
+    ],
+    "recoveryAp": {
+      "enabled": true,
+      "ssidPrefix": "Relay",
+      "channel": 1,
+      "timeoutMs": 0,
+      "remainActiveWhileOffline": true
+    }
   },
   "web": {
     "enabled": false,

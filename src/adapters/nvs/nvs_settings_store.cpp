@@ -20,7 +20,7 @@ constexpr std::uint32_t recordMagic{0x53414346};
 constexpr std::size_t recordHeaderSize{16};
 constexpr std::uint16_t legacyConfigurationSchemaVersion{1};
 constexpr std::size_t legacyConfigurationPayloadSize{159};
-constexpr std::size_t configurationPayloadSize{224};
+constexpr std::size_t configurationPayloadSize{633};
 constexpr std::size_t legacyConfigurationRecordSize{recordHeaderSize + legacyConfigurationPayloadSize};
 constexpr std::size_t configurationRecordSize{recordHeaderSize + configurationPayloadSize};
 
@@ -212,6 +212,24 @@ template <std::size_t Size>
 		writer.writeU8(channel.participatesInCentralSwitch ? 1 : 0);
 		writer.writeU8(channel.participatesInCentralOff ? 1 : 0);
 	}
+	writer.writeU8(configuration.network.enabled ? 1 : 0);
+	writer.writeArray(configuration.network.hostName);
+	for (const auto &profile : configuration.network.wifiProfiles)
+	{
+		writer.writeU8(profile.enabled ? 1 : 0);
+		writer.writeArray(profile.ssid);
+		writer.writeArray(profile.passphrase);
+		writer.writeU8(static_cast<std::uint8_t>(profile.ipv4.mode));
+		writer.writeArray(profile.ipv4.address);
+		writer.writeArray(profile.ipv4.subnetMask);
+		writer.writeArray(profile.ipv4.gateway);
+		writer.writeArray(profile.ipv4.dns);
+	}
+	writer.writeU8(configuration.network.recoveryAp.enabled ? 1 : 0);
+	writer.writeArray(configuration.network.recoveryAp.ssidPrefix);
+	writer.writeU8(configuration.network.recoveryAp.channel);
+	writer.writeU32(configuration.network.recoveryAp.timeoutMs);
+	writer.writeU8(configuration.network.recoveryAp.remainActiveWhileOffline ? 1 : 0);
 	writer.writeU8(configuration.web.enabled ? 1 : 0);
 	writer.writeU8(configuration.web.securityProvisioned ? 1 : 0);
 	writer.writeU8(configuration.indicators.maximumBrightness);
@@ -287,6 +305,40 @@ template <std::size_t Size>
 		channel.participatesInCentralSwitch = participatesInCentralSwitch != 0;
 		channel.participatesInCentralOff = participatesInCentralOff != 0;
 	}
+	const auto networkEnabled = reader.readU8();
+	if (networkEnabled > 1)
+	{
+		return false;
+	}
+	configuration.network.enabled = networkEnabled != 0;
+	reader.readArray(configuration.network.hostName);
+	for (auto &profile : configuration.network.wifiProfiles)
+	{
+		const auto profileEnabled = reader.readU8();
+		if (profileEnabled > 1)
+		{
+			return false;
+		}
+		profile.enabled = profileEnabled != 0;
+		reader.readArray(profile.ssid);
+		reader.readArray(profile.passphrase);
+		profile.ipv4.mode = static_cast<domain::IpMode>(reader.readU8());
+		reader.readArray(profile.ipv4.address);
+		reader.readArray(profile.ipv4.subnetMask);
+		reader.readArray(profile.ipv4.gateway);
+		reader.readArray(profile.ipv4.dns);
+	}
+	const auto recoveryEnabled = reader.readU8();
+	reader.readArray(configuration.network.recoveryAp.ssidPrefix);
+	configuration.network.recoveryAp.channel = reader.readU8();
+	configuration.network.recoveryAp.timeoutMs = reader.readU32();
+	const auto remainActiveWhileOffline = reader.readU8();
+	if (recoveryEnabled > 1 || remainActiveWhileOffline > 1)
+	{
+		return false;
+	}
+	configuration.network.recoveryAp.enabled = recoveryEnabled != 0;
+	configuration.network.recoveryAp.remainActiveWhileOffline = remainActiveWhileOffline != 0;
 	const auto webEnabled = reader.readU8();
 	const auto securityProvisioned = reader.readU8();
 	if (webEnabled > 1 || securityProvisioned > 1)

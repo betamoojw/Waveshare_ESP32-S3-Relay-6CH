@@ -96,3 +96,10 @@ Check: `design/fontend-instructions`
 ## KNX Switch Actuator
 
 Check: `design/knx_ip_switching_actuator-instructions.md`
+
+
+## Network Connectivity
+
+Check: `design/network-architecture.md`
+1. for Wi-Fi provisioning leverage the (https://github.com/tostmann/improv-wifi-busware.git) lib.
+2. for ethernet manaager leverage the networking-for-arduino/EthernetESP32@^1.0.2 lib. However this is out of scope in the current implementation.

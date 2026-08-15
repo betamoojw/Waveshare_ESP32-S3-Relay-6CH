@@ -9,6 +9,7 @@
 #include "scene_service.h"
 #include "switching_policy_service.h"
 #include "../adapters/bsp/esp32_relay_output.h"
+#include "../adapters/bsp/waveshare_esp32s3_relay6ch.h"
 #include "../adapters/button/button_adapter.h"
 #include "../adapters/cli/cli_adapter.h"
 #include "../adapters/configuration/json_configuration_source.h"
@@ -17,9 +18,12 @@
 #include "../adapters/modbus/esp32_modbus_serial_transport.h"
 #include "../adapters/modbus/modbus_application_gateway.h"
 #include "../adapters/modbus/modbus_configuration_gateway.h"
+#include "../adapters/network/network_manager.h"
 #include "../adapters/nvs/nvs_settings_store.h"
 #include "../adapters/watchdog/esp32_task_watchdog.h"
 #include "../domain/relay_policy.h"
+
+#include <improv_wifi/serial_filter.h>
 
 #include <cstdint>
 
@@ -50,6 +54,8 @@ public:
 private:
 	[[nodiscard]] static bool handleButtonEvent(const adapters::button::ButtonEvent &event, void *context) noexcept;
 	[[nodiscard]] static std::uint32_t monotonicMilliseconds(void *context) noexcept;
+	static void routeCliBytes(const std::uint8_t *data, std::size_t length, void *context) noexcept;
+	static void routeProvisioningBytes(const std::uint8_t *data, std::size_t length, void *context) noexcept;
 	[[nodiscard]] static bool extendModbusSnapshot(void *context,
 															 adapters::modbus::RegisterMapSnapshot &snapshot) noexcept;
 	[[nodiscard]] bool onButtonEvent(const adapters::button::ButtonEvent &event) noexcept;
@@ -72,6 +78,7 @@ private:
 	adapters::nvs::NvsSettingsStore settingsStore_{};
 	adapters::configuration::JsonConfigurationSource defaultConfigurationSource_;
 	ConfigurationService configurationService_;
+	adapters::network::NetworkManager network_{adapters::bsp::waveshareEsp32S3Relay6Ch, configurationService_, Serial};
 	adapters::indicators::StatusIndicator statusIndicator_;
 	adapters::button::ButtonAdapter button_;
 	adapters::knx::KnxAdapter knx_;
@@ -81,6 +88,7 @@ private:
 	adapters::modbus::ModbusRtuAdapter modbusRtu_;
 	adapters::cli::CliAdapter cli_;
 	adapters::watchdog::Esp32TaskWatchdog watchdog_{};
+	improv_wifi_busware::SerialFilter serialFilter_{};
 	std::uint32_t lastRelayProcessAtMs_{0};
 	std::uint32_t lastModbusPollAtMs_{0};
 	std::uint32_t lastButtonUpdateAtMs_{0};

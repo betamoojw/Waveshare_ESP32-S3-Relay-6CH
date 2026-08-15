@@ -79,7 +79,7 @@ std::int32_t Esp32ModbusSerialTransport::write(void *const context,
 
 std::optional<std::uint32_t> Esp32ModbusSerialTransport::serialConfig(const ModbusRtuConfiguration &configuration) noexcept
 {
-	if ((configuration.dataBits != 7 && configuration.dataBits != 8) ||
+	if (configuration.dataBits != 8 ||
 		(configuration.stopBits != 1 && configuration.stopBits != 2))
 	{
 		return std::nullopt;

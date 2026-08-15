@@ -268,7 +268,7 @@ CliInitializeResult CliAdapter::initialize() noexcept
 	cli_->appContext = this;
 	cli_->writeChar = writeCharacter;
 	cli_->onCommand = unknownCommand;
-	const std::array<CliCommandBinding, 17> bindings{{
+	const std::array<CliCommandBinding, 20> bindings{{
 		{"version", "Firmware and CLI version", true, this, versionCommand},
 		{"status", "Machine-readable device status", true, this, statusCommand},
 		{"get-relay", "get-relay [all|0..5]", true, this, getRelayCommand},
@@ -280,11 +280,14 @@ CliInitializeResult CliAdapter::initialize() noexcept
 		{"get-button", "Machine-readable BOOT button status", true, this, getButtonCommand},
 		{"get-modbus-role", "Get active Modbus RTU role", true, this, getModbusRoleCommand},
 		{"set-modbus-role", "set-modbus-role [server|client]", true, this, setModbusRoleCommand},
+		{"get-modbus-config", "Get Modbus RTU serial configuration", true, this, getModbusConfigCommand},
+		{"set-modbus-config", "set-modbus-config [slave_id] [baud] [none|even|odd] [stop_bits]", true, this, setModbusConfigCommand},
 		{"modbus-read-holding", "modbus-read-holding [unit] [address] [count]", true, this, modbusReadHoldingCommand},
 		{"modbus-write-register", "modbus-write-register [unit] [address] [value]", true, this, modbusWriteRegisterCommand},
 		{"get-knx", "get-knx [general|channel 0..5]", true, this, getKnxCommand},
 		{"set-knx", "set-knx [parameter] [value]", true, this, setKnxCommand},
 		{"set-knx-channel", "set-knx-channel [0..5] [parameter] [value]", true, this, setKnxChannelCommand},
+		{"set-wifi", "set-wifi [profile_0..2] [ssid] [passphrase]", true, this, setWifiCommand},
 		{"reboot", "Request a controlled restart", true, this, rebootCommand},
 	}};
 	for (const auto &binding : bindings)
@@ -309,19 +312,16 @@ CliPollResult CliAdapter::poll() noexcept
 		return CliPollResult::NotInitialized;
 	}
 
-	std::size_t received{0};
-	while (received < maximumInputBytesPerPoll && dependencies_.stream->available() > 0)
-	{
-		const auto value = dependencies_.stream->read();
-		if (value < 0)
-		{
-			break;
-		}
-		embeddedCliReceiveChar(cli_, static_cast<char>(value));
-		++received;
-	}
 	embeddedCliProcess(cli_);
-	return received == 0 ? CliPollResult::Idle : CliPollResult::Processed;
+	return CliPollResult::Idle;
+}
+
+void CliAdapter::ingest(const std::uint8_t value) noexcept
+{
+	if (initialized_)
+	{
+		embeddedCliReceiveChar(cli_, static_cast<char>(value));
+	}
 }
 
 void CliAdapter::setMaintenanceAuthorized(const bool authorized) noexcept
@@ -455,6 +455,16 @@ void CliAdapter::setModbusRoleCommand(EmbeddedCli *, char *const arguments, void
 	static_cast<CliAdapter *>(context)->handleSetModbusRole(arguments);
 }
 
+void CliAdapter::getModbusConfigCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleGetModbusConfig(arguments);
+}
+
+void CliAdapter::setModbusConfigCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleSetModbusConfig(arguments);
+}
+
 void CliAdapter::modbusReadHoldingCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
 {
 	static_cast<CliAdapter *>(context)->handleModbusReadHolding(arguments);
@@ -480,6 +490,11 @@ void CliAdapter::setKnxChannelCommand(EmbeddedCli *, char *const arguments, void
 	static_cast<CliAdapter *>(context)->handleSetKnxChannel(arguments);
 }
 
+void CliAdapter::setWifiCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleSetWifi(arguments);
+}
+
 void CliAdapter::rebootCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
 {
 	static_cast<CliAdapter *>(context)->handleReboot(arguments);
@@ -490,7 +505,8 @@ bool CliAdapter::dependenciesValid() const noexcept
 	return dependencies_.stream != nullptr && dependencies_.switchingPolicy != nullptr && dependencies_.relayService != nullptr &&
 		   dependencies_.lifecycleSupervisor != nullptr && dependencies_.diagnostics != nullptr &&
 		   dependencies_.configurationService != nullptr && dependencies_.statusIndicator != nullptr &&
-		   dependencies_.button != nullptr && dependencies_.modbus.isValid() && dependencies_.clock.isValid();
+		   dependencies_.button != nullptr && dependencies_.networkManager != nullptr && dependencies_.modbus.isValid() &&
+		   dependencies_.clock.isValid();
 }
 
 bool CliAdapter::mutatingCommandAllowed() const noexcept
@@ -821,6 +837,78 @@ void CliAdapter::handleSetModbusRole(char *const arguments) noexcept
 	print(role == ports::ModbusRtuRole::Server ? "ok=true role=server" : "ok=true role=client");
 }
 
+void CliAdapter::handleGetModbusConfig(char *const arguments) noexcept
+{
+	if (!hasNoArguments(arguments))
+	{
+		print("ok=false error=usage usage=get-modbus-config");
+		return;
+	}
+	const auto &configuration = dependencies_.configurationService->active().modbus;
+	const auto parity = configuration.parity == domain::SerialParity::None ? "none" :
+		configuration.parity == domain::SerialParity::Even ? "even" : "odd";
+	char response[160]{};
+	std::snprintf(response,
+		sizeof(response),
+		"ok=true slave_id=%u baud=%lu data_bits=%u parity=%s stop_bits=%u",
+		static_cast<unsigned int>(configuration.unitId),
+		static_cast<unsigned long>(configuration.baudRate),
+		static_cast<unsigned int>(configuration.dataBits),
+		parity,
+		static_cast<unsigned int>(configuration.stopBits));
+	print(response);
+}
+
+void CliAdapter::handleSetModbusConfig(char *const arguments) noexcept
+{
+	if (!mutatingCommandAllowed())
+	{
+		print("ok=false error=not-authorized");
+		return;
+	}
+	if (embeddedCliGetTokenCount(arguments) != 4)
+	{
+		print("ok=false error=usage usage=set-modbus-config_[slave_id_1..247]_[baud]_[none|even|odd]_[stop_bits_1|2]");
+		return;
+	}
+	std::uint8_t slaveId{0};
+	std::uint32_t baudRate{0};
+	std::uint8_t stopBits{0};
+	if (!parseUint8(embeddedCliGetToken(arguments, 1), 247, slaveId) || slaveId == 0 ||
+		!parseUint32(embeddedCliGetToken(arguments, 2), baudRate) ||
+		!parseUint8(embeddedCliGetToken(arguments, 4), 2, stopBits) || stopBits == 0)
+	{
+		print("ok=false error=invalid-value");
+		return;
+	}
+	domain::SerialParity parity{};
+	const auto *const parityToken = embeddedCliGetToken(arguments, 3);
+	if (std::strcmp(parityToken, "none") == 0)
+	{
+		parity = domain::SerialParity::None;
+	}
+	else if (std::strcmp(parityToken, "even") == 0)
+	{
+		parity = domain::SerialParity::Even;
+	}
+	else if (std::strcmp(parityToken, "odd") == 0)
+	{
+		parity = domain::SerialParity::Odd;
+	}
+	else
+	{
+		print("ok=false error=invalid-parity");
+		return;
+	}
+	auto configuration = dependencies_.configurationService->active();
+	configuration.modbus.unitId = slaveId;
+	configuration.modbus.baudRate = baudRate;
+	configuration.modbus.dataBits = 8;
+	configuration.modbus.parity = parity;
+	configuration.modbus.stopBits = stopBits;
+	commitKnxConfiguration(configuration);
+}
+
 void CliAdapter::handleModbusReadHolding(char *const arguments) noexcept
 {
 	if (!mutatingCommandAllowed())
@@ -1104,6 +1192,36 @@ void CliAdapter::handleSetKnxChannel(char *const arguments) noexcept
 		return;
 	}
 	commitKnxConfiguration(configuration);
+}
+
+void CliAdapter::handleSetWifi(char *const arguments) noexcept
+{
+	if (!mutatingCommandAllowed())
+	{
+		print("ok=false error=maintenance-authorization-required");
+		return;
+	}
+	if (embeddedCliGetTokenCount(arguments) != 3)
+	{
+		print("ok=false error=usage usage=set-wifi_[profile_0..2]_[ssid]_[passphrase]");
+		return;
+	}
+	std::uint8_t profileIndex{0};
+	const auto *const profile = embeddedCliGetToken(arguments, 1);
+	const auto *const ssid = embeddedCliGetToken(arguments, 2);
+	const auto *const passphrase = embeddedCliGetToken(arguments, 3);
+	if (!parseUint8(profile, static_cast<std::uint8_t>(domain::wifiProfileCount - 1), profileIndex) || ssid == nullptr ||
+		passphrase == nullptr || !dependencies_.networkManager->provisionWifiProfile(profileIndex,
+			ssid,
+			passphrase,
+			dependencies_.clock.nowMs()))
+	{
+		print("ok=false error=wifi-provisioning-failed");
+		return;
+	}
+	char response[48]{};
+	std::snprintf(response, sizeof(response), "ok=true profile=%u reconfiguring=true", static_cast<unsigned int>(profileIndex));
+	print(response);
 }
 
 void CliAdapter::commitKnxConfiguration(const domain::Configuration &configuration) noexcept

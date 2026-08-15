@@ -8,11 +8,52 @@
 
 namespace switch_actuator::domain
 {
-inline constexpr std::uint16_t currentConfigurationSchemaVersion{2};
+inline constexpr std::uint16_t currentConfigurationSchemaVersion{3};
 inline constexpr std::size_t boardModelCapacity{32};
 inline constexpr std::size_t hardwareRevisionCapacity{16};
 inline constexpr std::size_t deviceSerialCapacity{32};
 inline constexpr std::size_t deviceUuidSize{16};
+inline constexpr std::size_t networkHostNameCapacity{32};
+inline constexpr std::size_t wifiSsidCapacity{33};
+inline constexpr std::size_t wifiPassphraseCapacity{64};
+inline constexpr std::size_t recoveryApPrefixCapacity{24};
+inline constexpr std::size_t wifiProfileCount{3};
+
+enum class IpMode : std::uint8_t { Dhcp, Static };
+
+struct Ipv4Configuration final
+{
+	IpMode mode{IpMode::Dhcp};
+	std::array<std::uint8_t, 4> address{};
+	std::array<std::uint8_t, 4> subnetMask{};
+	std::array<std::uint8_t, 4> gateway{};
+	std::array<std::uint8_t, 4> dns{};
+};
+
+struct WifiProfile final
+{
+	bool enabled{false};
+	std::array<char, wifiSsidCapacity> ssid{};
+	std::array<char, wifiPassphraseCapacity> passphrase{};
+	Ipv4Configuration ipv4{};
+};
+
+struct RecoveryApConfiguration final
+{
+	bool enabled{true};
+	std::array<char, recoveryApPrefixCapacity> ssidPrefix{"Relay"};
+	std::uint8_t channel{1};
+	std::uint32_t timeoutMs{0};
+	bool remainActiveWhileOffline{true};
+};
+
+struct NetworkConfiguration final
+{
+	bool enabled{true};
+	std::array<char, networkHostNameCapacity> hostName{"relay-actuator"};
+	std::array<WifiProfile, wifiProfileCount> wifiProfiles{};
+	RecoveryApConfiguration recoveryAp{};
+};
 
 enum class RestorePolicy : std::uint8_t
 {
@@ -95,6 +136,7 @@ struct Configuration final
 	ModbusConfiguration modbus{};
 	std::array<RelayChannelConfiguration, relayChannelCount> relayChannels{};
 	KnxConfiguration knx{};
+	NetworkConfiguration network{};
 	WebConfiguration web{};
 	IndicatorConfiguration indicators{};
 };
@@ -112,6 +154,7 @@ enum class ConfigurationValidationError : std::uint8_t
 	InvalidSerialFormat,
 	InvalidRelayConfiguration,
 	InvalidKnxConfiguration,
+	InvalidNetworkConfiguration,
 	MissingWebSecurity,
 	InvalidIndicatorPolicy
 };

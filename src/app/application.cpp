@@ -17,6 +17,7 @@ constexpr std::uint32_t buttonUpdateIntervalMs{10};
 constexpr std::uint32_t cliPollIntervalMs{10};
 constexpr std::uint32_t indicatorUpdateIntervalMs{20};
 constexpr std::uint32_t diagnosticsUpdateIntervalMs{1000};
+constexpr std::size_t maximumSerialInputBytesPerUpdate{64};
 
 #ifdef FIRMWARE_VERSION
 constexpr std::string_view firmwareVersion{FIRMWARE_VERSION};
@@ -46,9 +47,10 @@ Application::Application() noexcept
 	  relayTimerService_{switchingPolicy_},
 	  defaultConfigurationSource_{adapters::configuration::embeddedDefaultConfigurationJson()},
 	  configurationService_{settingsStore_.port()},
+	  network_{adapters::bsp::waveshareEsp32S3Relay6Ch, configurationService_, Serial},
 	  statusIndicator_{adapters::bsp::waveshareEsp32S3Relay6Ch},
 	  button_{adapters::bsp::waveshareEsp32S3Relay6Ch, handleButtonEvent, this},
-	  knx_{{&switchingPolicy_, &relayService_, &diagnostics_, ports::ClockPort{monotonicMilliseconds, this}}},
+	  knx_{{&switchingPolicy_, &relayService_, &diagnostics_, ports::ClockPort{monotonicMilliseconds, this}, network_.statusPort()}},
 	  modbusConfigurationGateway_{{&configurationService_,
 		&lifecycle_,
 		&diagnostics_,
@@ -79,6 +81,7 @@ Application::Application() noexcept
 		&configurationService_,
 		&statusIndicator_,
 		&button_,
+		&network_,
 		modbusRtu_.controlPort(),
 		ports::ClockPort{monotonicMilliseconds, this},
 		mutatingCliCommandsEnabled}}
@@ -167,6 +170,8 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	}
 	Serial.begin(115200);
 	cliAvailable_ = cli_.initialize() == adapters::cli::CliInitializeResult::Initialized;
+	serialFilter_.setSinks(routeCliBytes, this, routeProvisioningBytes, this);
+	network_.initialize(nowMs);
 	const auto knxResult = knx_.initialize(configurationService_.active().knx, nowMs);
 	const auto &modbusConfiguration = configurationService_.active().modbus;
 	const adapters::modbus::ModbusRtuConfiguration rtuConfiguration{
@@ -265,8 +270,21 @@ void Application::update(const std::uint32_t nowMs) noexcept
 	if (cliAvailable_ && nowMs - lastCliPollAtMs_ >= cliPollIntervalMs)
 	{
 		lastCliPollAtMs_ = nowMs;
+		std::size_t received{0};
+		while (received < maximumSerialInputBytesPerUpdate && Serial.available() > 0)
+		{
+			const auto value = Serial.read();
+			if (value < 0)
+			{
+				break;
+			}
+			const auto byte = static_cast<std::uint8_t>(value);
+			serialFilter_.feed(&byte, 1);
+			++received;
+		}
 		static_cast<void>(cli_.poll());
 	}
+	network_.update(nowMs);
 	if (nowMs - lastIndicatorUpdateAtMs_ >= indicatorUpdateIntervalMs)
 	{
 		lastIndicatorUpdateAtMs_ = nowMs;
@@ -287,6 +305,30 @@ void Application::update(const std::uint32_t nowMs) noexcept
 bool Application::isInitialized() const noexcept
 {
 	return initialized_;
+}
+
+void Application::routeCliBytes(const std::uint8_t *const data, const std::size_t length, void *const context) noexcept
+{
+	if (context == nullptr || data == nullptr)
+	{
+		return;
+	}
+
+	auto &application = *static_cast<Application *>(context);
+	for (std::size_t index = 0; index < length; ++index)
+	{
+		application.cli_.ingest(data[index]);
+	}
+}
+
+void Application::routeProvisioningBytes(const std::uint8_t *const data,
+	const std::size_t length,
+	void *const context) noexcept
+{
+	if (context != nullptr)
+	{
+		static_cast<Application *>(context)->network_.ingestProvisioning(data, length);
+	}
 }
 
 bool Application::handleButtonEvent(const adapters::button::ButtonEvent &event, void *const context) noexcept

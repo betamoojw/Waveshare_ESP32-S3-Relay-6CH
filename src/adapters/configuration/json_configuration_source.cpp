@@ -230,6 +230,58 @@ template <std::size_t Capacity>
 	}
 	return true;
 }
+
+template <std::size_t Capacity>
+[[nodiscard]] bool readOptionalText(const JsonVariantConst value, std::array<char, Capacity> &output) noexcept
+{
+	return value.isNull() || readText(value, output);
+}
+
+[[nodiscard]] bool readNetworkConfiguration(const JsonObjectConst root, domain::NetworkConfiguration &network) noexcept
+{
+	const auto value = root["network"];
+	if (value.isNull())
+	{
+		return true;
+	}
+	if (!value.is<JsonObjectConst>())
+	{
+		return false;
+	}
+	const auto object = value.as<JsonObjectConst>();
+	const auto profiles = object["wifiProfiles"];
+	const auto recoveryAp = object["recoveryAp"];
+	if (!object["enabled"].is<bool>() || !readText(object["hostName"], network.hostName) ||
+		!profiles.is<JsonArrayConst>() || profiles.as<JsonArrayConst>().size() != network.wifiProfiles.size() ||
+		!recoveryAp.is<JsonObjectConst>())
+	{
+		return false;
+	}
+	network.enabled = object["enabled"].as<bool>();
+	for (std::size_t index = 0; index < network.wifiProfiles.size(); ++index)
+	{
+		const auto source = profiles[index];
+		auto &target = network.wifiProfiles[index];
+		if (!source.is<JsonObjectConst>() || !source["enabled"].is<bool>() ||
+			!readOptionalText(source["ssid"], target.ssid) || !readOptionalText(source["passphrase"], target.passphrase))
+		{
+			return false;
+		}
+		target.enabled = source["enabled"].as<bool>();
+	}
+	const auto recovery = recoveryAp.as<JsonObjectConst>();
+	if (!recovery["enabled"].is<bool>() || !readText(recovery["ssidPrefix"], network.recoveryAp.ssidPrefix) ||
+		!recovery["channel"].is<std::uint8_t>() || !recovery["timeoutMs"].is<std::uint32_t>() ||
+		!recovery["remainActiveWhileOffline"].is<bool>())
+	{
+		return false;
+	}
+	network.recoveryAp.enabled = recovery["enabled"].as<bool>();
+	network.recoveryAp.channel = recovery["channel"].as<std::uint8_t>();
+	network.recoveryAp.timeoutMs = recovery["timeoutMs"].as<std::uint32_t>();
+	network.recoveryAp.remainActiveWhileOffline = recovery["remainActiveWhileOffline"].as<bool>();
+	return true;
+}
 }
 
 ports::ConfigurationSource JsonConfigurationSource::port() noexcept
@@ -272,7 +324,7 @@ ports::ConfigurationSourceResult JsonConfigurationSource::load(domain::Configura
 
 	domain::Configuration parsed{};
 	const auto sourceSchemaVersion = root["schemaVersion"].as<std::uint16_t>();
-	if (sourceSchemaVersion != 1 && sourceSchemaVersion != domain::currentConfigurationSchemaVersion)
+	if (sourceSchemaVersion != 1 && sourceSchemaVersion != 2 && sourceSchemaVersion != domain::currentConfigurationSchemaVersion)
 	{
 		return ports::ConfigurationSourceResult::Invalid;
 	}
@@ -345,6 +397,10 @@ ports::ConfigurationSourceResult JsonConfigurationSource::load(domain::Configura
 		parsed.knx.centralSwitchGroupAddress = knx["centralSwitchGroupAddress"].as<std::uint16_t>();
 		parsed.knx.centralOffGroupAddress = knx["centralOffGroupAddress"].as<std::uint16_t>();
 		parsed.knx.deviceFaultGroupAddress = knx["deviceFaultGroupAddress"].as<std::uint16_t>();
+	}
+	if (!readNetworkConfiguration(root, parsed.network))
+	{
+		return ports::ConfigurationSourceResult::Invalid;
 	}
 	parsed.web.enabled = web["enabled"].as<bool>();
 	parsed.web.securityProvisioned = web["securityProvisioned"].as<bool>();

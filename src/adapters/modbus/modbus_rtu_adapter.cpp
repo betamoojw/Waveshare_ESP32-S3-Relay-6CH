@@ -399,7 +399,7 @@ nmbs_error ModbusRtuAdapter::readDeviceIdentificationMap(nmbs_bitfield_256 map) 
 bool ModbusRtuAdapter::validConfiguration(const ModbusRtuConfiguration &configuration) noexcept
 {
 	return configuration.unitId >= 1 && configuration.unitId <= 247 && configuration.baudRate > 0 &&
-		   (configuration.dataBits == 7 || configuration.dataBits == 8) &&
+		   configuration.dataBits == 8 &&
 		   (configuration.stopBits == 1 || configuration.stopBits == 2) &&
 		   (configuration.parity == domain::SerialParity::None || configuration.parity == domain::SerialParity::Even ||
 			configuration.parity == domain::SerialParity::Odd);
