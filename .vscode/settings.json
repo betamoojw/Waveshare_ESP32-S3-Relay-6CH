@@ -72,5 +72,9 @@
         "csignal": "cpp",
         "*.h_": "cpp",
         "*.cpp_": "cpp"
+    },
+    "chat.tools.terminal.autoApprove": {
+        "npm install": true,
+        "npm run build": true
     }
 }
