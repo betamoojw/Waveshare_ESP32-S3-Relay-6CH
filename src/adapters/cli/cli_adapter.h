@@ -6,6 +6,7 @@
 #include "../../app/relay_command_queue.h"
 #include "../../app/relay_command_service.h"
 #include "../../app/switching_policy_service.h"
+#include "../../app/web_security_service.h"
 #include "../../ports/clock_port.h"
 #include "../../ports/configuration_file_port.h"
 #include "../../ports/modbus_rtu_control_port.h"
@@ -45,6 +46,7 @@ struct CliDependencies final
 	app::LifecycleSupervisor *lifecycleSupervisor{nullptr};
 	app::DiagnosticsService *diagnostics{nullptr};
 	app::ConfigurationService *configurationService{nullptr};
+	app::WebSecurityService *webSecurityService{nullptr};
 	ports::ConfigurationFilePort configurationFile{};
 	indicators::StatusIndicator *statusIndicator{nullptr};
 	const button::ButtonAdapter *button{nullptr};
@@ -68,7 +70,7 @@ public:
 
 private:
 	static constexpr std::size_t bufferSize{4096};
-	static constexpr std::uint16_t maximumBindings{23};
+	static constexpr std::uint16_t maximumBindings{24};
 
 	static void writeCharacter(EmbeddedCli *cli, char character) noexcept;
 	static void unknownCommand(EmbeddedCli *cli, CliCommand *command) noexcept;
@@ -94,6 +96,8 @@ private:
 	static void loadConfigCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void storeConfigCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 	static void rebootCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
+	static void provisionWebCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
+	static void manufacturingTestCommand(EmbeddedCli *cli, char *arguments, void *context) noexcept;
 
 	[[nodiscard]] bool dependenciesValid() const noexcept;
 	[[nodiscard]] bool mutatingCommandAllowed() const noexcept;
@@ -123,6 +127,9 @@ private:
 	void handleStoreConfig(char *arguments) noexcept;
 	void commitConfiguration(const domain::Configuration &configuration) noexcept;
 	void handleReboot(char *arguments) noexcept;
+	void handleProvisionWeb(char *arguments) noexcept;
+	void handleManufacturingTest(char *arguments) noexcept;
+	void printManufacturingSnapshot() noexcept;
 
 	CliDependencies dependencies_;
 	alignas(CLI_UINT) std::array<CLI_UINT, BYTES_TO_CLI_UINTS(bufferSize)> buffer_{};

@@ -1,4 +1,4 @@
-import type { Capabilities, CommandResult, Device, Diagnostics, NetworkStatus, RelayList, RelayState } from './types'
+import type { Capabilities, CommandResult, Device, Diagnostics, KnxConfiguration, KnxConfigurationUpdate, ModbusConfiguration, ModbusConfigurationUpdate, NetworkStatus, OtaStatus, RelayList, RelayState, User, WifiManagement, WifiProfileUpdate, WifiRecoveryAp } from './types'
 
 export const mockCapabilities: Capabilities = {
   apiVersion: '1.0',
@@ -16,9 +16,9 @@ export const mockCapabilities: Capabilities = {
     timers: false,
     remoteRestart: false,
     remoteFactoryReset: false,
-    firmwareUpdate: false,
+    firmwareUpdate: true,
   },
-  permissions: ['relay:read', 'relay:command', 'diagnostics:read', 'configuration:read'],
+  permissions: ['relay:read', 'relay:command', 'diagnostics:read', 'configuration:read', 'configuration:write', 'users:manage', 'firmware:update'],
 }
 
 export const mockDevice: Device = {
@@ -99,4 +99,174 @@ export async function commandMockRelay(channel: number, state: RelayState): Prom
     appliedState: state,
     sequence: relay.transitionSequence,
   }
+}
+
+export const mockWifiManagement: WifiManagement = {
+  generation: 12,
+  activeProfileIndex: 0,
+  scan: {
+    state: 'complete',
+    sequence: 3,
+    results: [
+      { ssid: 'Plant-Network', rssi: -48, channel: 6, secured: true },
+      { ssid: 'Service-LAN', rssi: -67, channel: 11, secured: true },
+      { ssid: 'Commissioning', rssi: -74, channel: 1, secured: false },
+    ],
+  },
+  profiles: [
+    { index: 0, enabled: true, ssid: 'Plant-Network', hasPassphrase: true, ipv4: { mode: 'static', address: '192.168.10.42', subnetMask: '255.255.255.0', gateway: '192.168.10.1', dns: '192.168.10.1' } },
+    { index: 1, enabled: true, ssid: 'Service-LAN', hasPassphrase: true, ipv4: { mode: 'dhcp', address: '', subnetMask: '', gateway: '', dns: '' } },
+    { index: 2, enabled: false, ssid: '', hasPassphrase: false, ipv4: { mode: 'dhcp', address: '', subnetMask: '', gateway: '', dns: '' } },
+  ],
+  recoveryAp: { enabled: true, ssidPrefix: 'Relay', channel: 1, timeoutMs: 0, remainActiveWhileOffline: true, active: false },
+}
+
+export const mockUsers: User[] = [
+  { id: 0, username: 'admin', role: 'administrator', enabled: true },
+  { id: 1, username: 'operator', role: 'guest', enabled: true },
+]
+
+export const mockOtaStatus: OtaStatus = {
+  state: 'idle', progressPercent: 0, currentVersion: '1.00', buildEnvironment: 'ws_esp32-s3-relay-6ch', availableVersion: null, error: null,
+}
+
+export const mockModbusConfiguration: ModbusConfiguration = {
+  generation: 12,
+  role: 'server',
+  unitId: 10,
+  baudRate: 115200,
+  parity: 'none',
+  dataBits: 8,
+  stopBits: 1,
+}
+
+export const mockKnxConfiguration: KnxConfiguration = {
+  generation: 12,
+  enabled: true,
+  individualAddress: '1.1.20',
+  startupTransmitDelayMs: 3000,
+  minimumTelegramIntervalMs: 100,
+  cyclicStatusIntervalMs: 0,
+  heartbeatIntervalMs: 60_000,
+  readSwitchObject: true,
+  heartbeatGroupAddress: '0/0/1',
+  centralSwitchGroupAddress: '0/0/2',
+  centralOffGroupAddress: '0/0/3',
+  deviceFaultGroupAddress: '0/0/4',
+  channels: Array.from({ length: 6 }, (_, index) => ({
+    index,
+    switchGroupAddress: `1/0/${index * 2 + 1}`,
+    statusGroupAddress: `1/0/${index * 2 + 2}`,
+    faultGroupAddress: '',
+    commandPolarityInverted: false,
+    statusPolarityInverted: false,
+    sendStatusAfterStartup: true,
+    participatesInCentralSwitch: true,
+    participatesInCentralOff: true,
+  })),
+}
+
+function assertGeneration(expectedGeneration: number) {
+  if (expectedGeneration !== mockDevice.configurationGeneration) throw new Error('configuration.generation_conflict')
+}
+
+function advanceGeneration() {
+  mockDevice.configurationGeneration += 1
+  mockWifiManagement.generation = mockDevice.configurationGeneration
+  mockModbusConfiguration.generation = mockDevice.configurationGeneration
+  mockKnxConfiguration.generation = mockDevice.configurationGeneration
+}
+
+export async function saveMockModbusConfiguration(configuration: ModbusConfigurationUpdate): Promise<ModbusConfiguration> {
+  await wait(300)
+  assertGeneration(configuration.expectedGeneration)
+  Object.assign(mockModbusConfiguration, {
+    unitId: configuration.unitId,
+    baudRate: configuration.baudRate,
+    parity: configuration.parity,
+    stopBits: configuration.stopBits,
+    dataBits: 8 as const,
+  })
+  advanceGeneration()
+  mockDiagnostics.protocols.modbus.unitId = mockModbusConfiguration.unitId
+  mockDiagnostics.protocols.modbus.baudRate = mockModbusConfiguration.baudRate
+  return structuredClone(mockModbusConfiguration)
+}
+
+export async function setMockModbusRole(role: ModbusConfiguration['role']): Promise<ModbusConfiguration> {
+  await wait(200)
+  mockModbusConfiguration.role = role
+  return structuredClone(mockModbusConfiguration)
+}
+
+export async function saveMockKnxConfiguration(configuration: KnxConfigurationUpdate): Promise<KnxConfiguration> {
+  await wait(300)
+  assertGeneration(configuration.expectedGeneration)
+  const { expectedGeneration, ...replacement } = configuration
+  void expectedGeneration
+  Object.assign(mockKnxConfiguration, structuredClone(replacement))
+  advanceGeneration()
+  mockDiagnostics.protocols.knx.enabled = mockKnxConfiguration.enabled
+  mockDiagnostics.protocols.knx.individualAddress = mockKnxConfiguration.individualAddress || null
+  return structuredClone(mockKnxConfiguration)
+}
+
+export async function saveMockWifiProfile(profile: WifiProfileUpdate): Promise<WifiManagement> {
+  await wait(300)
+  assertGeneration(profile.expectedGeneration)
+  const current = mockWifiManagement.profiles[profile.index]
+  mockWifiManagement.profiles[profile.index] = {
+    index: profile.index, enabled: profile.enabled, ssid: profile.ssid,
+    hasPassphrase: profile.clearPassphrase ? false : Boolean(profile.passphrase) || current.hasPassphrase,
+    ipv4: structuredClone(profile.ipv4),
+  }
+  advanceGeneration()
+  return structuredClone(mockWifiManagement)
+}
+
+export async function deleteMockWifiProfile(index: number, expectedGeneration: number): Promise<WifiManagement> {
+  await wait(250)
+  assertGeneration(expectedGeneration)
+  mockWifiManagement.profiles.splice(index, 1)
+  mockWifiManagement.profiles.push({ index: 2, enabled: false, ssid: '', hasPassphrase: false, ipv4: { mode: 'dhcp', address: '', subnetMask: '', gateway: '', dns: '' } })
+  mockWifiManagement.profiles.forEach((profile, profileIndex) => { profile.index = profileIndex })
+  if (mockWifiManagement.activeProfileIndex === index) mockWifiManagement.activeProfileIndex = null
+  advanceGeneration()
+  return structuredClone(mockWifiManagement)
+}
+
+export async function moveMockWifiProfile(index: number, toIndex: number, expectedGeneration: number): Promise<WifiManagement> {
+  await wait(250)
+  assertGeneration(expectedGeneration)
+  const [profile] = mockWifiManagement.profiles.splice(index, 1)
+  mockWifiManagement.profiles.splice(toIndex, 0, profile)
+  mockWifiManagement.profiles.forEach((candidate, profileIndex) => { candidate.index = profileIndex })
+  if (mockWifiManagement.activeProfileIndex === index) mockWifiManagement.activeProfileIndex = toIndex
+  advanceGeneration()
+  return structuredClone(mockWifiManagement)
+}
+
+export async function connectMockWifiProfile(index: number): Promise<WifiManagement> {
+  await wait(450)
+  if (!mockWifiManagement.profiles[index]?.enabled) throw new Error('wifi.profile_disabled')
+  mockWifiManagement.activeProfileIndex = index
+  mockWifiManagement.recoveryAp.active = false
+  return structuredClone(mockWifiManagement)
+}
+
+export async function saveMockRecoveryAp(recoveryAp: Omit<WifiRecoveryAp, 'active'>, expectedGeneration: number): Promise<WifiManagement> {
+  await wait(250)
+  assertGeneration(expectedGeneration)
+  mockWifiManagement.recoveryAp = { ...structuredClone(recoveryAp), active: mockWifiManagement.recoveryAp.active }
+  advanceGeneration()
+  return structuredClone(mockWifiManagement)
+}
+
+export async function saveMockUser(user: Omit<User, 'id'> & { id?: number }): Promise<User[]> {
+  await wait(250)
+  const saved = { ...user, id: user.id ?? Math.max(...mockUsers.map((candidate) => candidate.id), -1) + 1 }
+  const index = mockUsers.findIndex((candidate) => candidate.id === saved.id)
+  if (index >= 0) mockUsers[index] = saved
+  else mockUsers.push(saved)
+  return structuredClone(mockUsers)
 }

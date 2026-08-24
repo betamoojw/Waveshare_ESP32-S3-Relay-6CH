@@ -8,6 +8,32 @@ The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** def
 
 The file name `fontend-instructions.md` is retained because it is the requested repository path. New references SHOULD use this exact path until a deliberate repository-wide rename is approved.
 
+### 1.1 Production Release Profile
+
+The following decisions are normative for the first production release:
+
+| Concern | Approved decision |
+|---|---|
+| Hardware/runtime | Waveshare ESP32-S3-Relay-6CH, 8 MiB flash, no PSRAM assumption, Arduino-ESP32 3.1.3, C++17 |
+| Web transport | Exactly pinned `hoeken/PsychicHttp@3.1.2` using `PsychicHttpsServer`, subject to the required no-PSRAM HIL load gate |
+| Trust boundary | Device-local HTTPS for every authenticated route; recovery-AP HTTP is provisioning-only and exposes no operational API |
+| Authentication | Short-lived HS256 JWT in an `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/` cookie; separate CSRF token, exact-Origin validation, bounded `jti` revocation/session records, and signing-generation revocation |
+| Roles | `administrator` and `guest`; UI behavior is driven by returned permission strings, not role-name checks |
+| Provisioning/recovery | First administrator, TLS identity, and credential recovery require physical presence through serial CLI or the recovery provisioning surface; no default password |
+| Live state | Authenticated same-origin WebSocket with sequence/boot recovery; REST snapshots and bounded polling are fallback |
+| Static assets | Content-hashed assets under allowlisted `/www/`; committed generated output must reproduce byte-for-byte from the lockfile and manifest |
+| OTA | Signed local `.bin` upload and approved remote HTTPS release retrieval to the inactive `app0`/`app1` slot; environment/product/hardware/version validation, rollback, and post-boot health confirmation are mandatory |
+| Factory reset | Physical BOOT-button gesture only; no remote API or web confirmation flow |
+| Browsers/localization | Current and previous major Chromium, Firefox, Safari, and iOS Safari; English first, message-catalog architecture required |
+
+Production readiness is capability-specific. The current repository has a
+buildable frontend, generated LittleFS assets, relay UI foundation, and bounded
+Wi-Fi scan/status support. It does not yet have the firmware HTTPS adapter,
+protected user/JWT store, CSRF middleware, command completion tracker, WebSocket
+journal, or OTA service. Those capabilities MUST remain absent/false until their
+implementation and release gates pass. Development preview data MUST be visibly
+labeled, development-only, and impossible to select in a production build.
+
 ## 2. Product Intent
 
 The web console is an operational tool for installers, commissioning engineers, and authorized operators. Its first screen MUST be the usable relay control surface, not a marketing page, setup wizard, or decorative dashboard.
@@ -35,7 +61,7 @@ The production console includes:
 - Modbus RTU configuration and health;
 - KNX availability, commissioning state, bindings, and health when supported;
 - network and web security configuration when supported;
-- diagnostics, event history, support export, restart, update, and factory reset;
+- diagnostics, event history, support export, controlled restart, update, and physical factory-reset guidance;
 - responsive layouts for desktop, tablet, and mobile;
 - accessible keyboard, pointer, touch, and assistive-technology operation.
 
@@ -51,25 +77,29 @@ The frontend MUST NOT:
 
 ## 4. Users and Authorization
 
-### 4.1 Roles
+### 4.1 Roles and Permissions
 
 The API is authoritative for authorization. The frontend hides unavailable actions for clarity but MUST also handle `403 Forbidden` correctly.
 
-| Role | Intended access |
+| Persisted role | Intended access |
 |---|---|
-| Viewer | Read device, relay, protocol, and diagnostic state |
-| Operator | Viewer access plus relay commands and acknowledgement of non-critical notices |
-| Installer | Operator access plus channel, Modbus, KNX, and network configuration |
-| Administrator | Installer access plus users, firmware update, restart, support export, and factory reset |
+| Guest | Read device, relay, protocol, network summary, and non-sensitive diagnostics |
+| Administrator | Guest access plus relay commands, configuration, users, firmware update, restart, and support export |
 
-A firmware build MAY expose fewer roles, but MUST return explicit capabilities and permissions. The UI MUST derive available actions from those permissions instead of hard-coding role names.
+The API MUST return explicit permissions such as `relay:read`, `relay:command`,
+`configuration:read`, `configuration:write`, `diagnostics:read`, `users:manage`,
+and `firmware:update`. The UI MUST derive actions from permissions instead of
+hard-coding role names. A future role expansion requires an ADR and must not
+change existing permission meanings.
 
-### 4.2 Session Behavior
+### 4.2 JWT Session Behavior
 
-- Authentication MUST use a secure server-managed session or another approved device-local scheme.
-- Session cookies MUST be `HttpOnly`, `Secure` when HTTPS is active, and `SameSite=Strict` unless a reviewed integration requires otherwise.
-- The frontend MUST NOT store authentication tokens in `localStorage` or URL parameters.
-- Mutating requests MUST include CSRF protection when cookie authentication is used.
+- Successful authentication MUST issue a signed HS256 JWT in a `__Host-switch_session` cookie. The cookie MUST be `HttpOnly`, `Secure`, `SameSite=Strict`, have `Path=/`, and omit `Domain`.
+- JWT access lifetime is 15 minutes. The absolute authenticated-session lifetime is 8 hours. Refresh or rotation MUST preserve the absolute limit and bounded server-side `jti` record.
+- JWT claims MUST include issuer/device identity, subject/user ID, role, permission version, `iat`, `exp`, `jti`, and signing generation. The server MUST validate every claim and reject unknown algorithms.
+- Logout, password change, role change, user disablement, credential recovery, and signing-key rotation MUST revoke affected JWTs immediately through bounded `jti` or generation state.
+- The frontend MUST NOT read or store JWTs in JavaScript, `localStorage`, `sessionStorage`, IndexedDB, URL parameters, or logs.
+- Mutating requests MUST send the separate CSRF token in `X-CSRF-Token`; the server MUST also enforce exact `Origin` and expected `Host`.
 - The UI MUST provide sign-out and show the signed-in identity and effective permission level.
 - Session expiry MUST preserve only non-sensitive unsaved form input in memory and route to sign-in with a clear reason.
 - Failed authentication MUST use a generic message and MUST NOT reveal whether a username exists.
@@ -86,7 +116,7 @@ Primary destinations:
 | `/protocols` | Protocols | Modbus and KNX status/configuration |
 | `/diagnostics` | Diagnostics | Health, faults, events, counters, and support export |
 | `/settings` | Settings | Device, channel, network, security, and restore policy |
-| `/maintenance` | Maintenance | Firmware update, restart, backup/restore, factory reset |
+| `/maintenance` | Maintenance | Firmware update, restart, backup/restore, and physical factory-reset guidance |
 | `/login` | Sign in | Authentication only |
 
 The selected route MUST survive a normal reload. Protected routes MUST redirect unauthenticated users to `/login` and return them to the original safe route after successful authentication. Never return automatically to a destructive confirmation flow.
@@ -317,7 +347,7 @@ When supported, display physical medium, individual address, bus state, programm
 
 Group addresses use structured three-level inputs when that notation is configured. The frontend MUST submit the firmware's canonical representation and MUST NOT infer unsupported datapoint types.
 
-Programming mode requires Installer permission and explicit confirmation. Show a persistent banner and countdown while active. Never display KNX keys. If KNX hardware is absent, explain `Not available on this hardware` and do not render fake configuration controls.
+Programming mode requires Administrator permission and explicit confirmation. Show a persistent banner and countdown while active. Never display KNX keys. If KNX hardware is absent, explain `Not available on this hardware` and do not render fake configuration controls.
 
 ## 10. Settings
 
@@ -350,6 +380,16 @@ Safety-impacting changes include a concise consequence summary. Do not place all
 ### 10.3 Restore and Safety
 
 Default `All off` is visibly marked as the safest policy. Selecting `Last known` after abnormal reset requires acknowledgement of its operational consequence. The frontend MUST not invent restore choices omitted by firmware capabilities.
+
+### 10.4 Wi-Fi Management
+
+The Network section presents exactly three priority-ordered profiles from firmware capabilities. It shows active profile, enabled state, SSID, `hasPassphrase`, DHCP/static policy, current generation, scan status, and recovery-AP state. Passphrases are write-only and never enter query keys, URLs, logs, browser storage, returned models, or diagnostics.
+
+Administrator controls SHALL provide asynchronous scan/select, profile save, explicit clear-secret, move up/down, connect now, delete with confirmation, and recovery-AP enable/prefix/channel/timeout/remain-active policy. An omitted secret preserves the stored value; clear and replacement are distinct requests. Delete compacts the remaining priority order. Connect now starts an attempt and MUST NOT display online until the authoritative network snapshot confirms association and usable IP.
+
+Every persisted mutation sends the generation from the last authoritative snapshot. On `409 configuration.generation_conflict`, preserve the unsaved draft, explain that settings changed, refetch, and require deliberate retry. Server validation maps duplicate SSID and static IPv4 errors to controls. Poll only while scan or connection state changes. Guest users may see only permission-approved redacted state and never receive mutation controls.
+
+Recovery AP configuration is an unframed settings band, not a nested card. State whether it is active or on standby. The UI MUST explain operational consequence at confirmation time, but MUST NOT expose the derived device passphrase, relay controls, normal user/configuration management, detailed diagnostics, KNX/IP, or OTA through the AP provisioning surface.
 
 ## 11. Diagnostics
 
@@ -390,7 +430,7 @@ Restart requires confirmation and states that relay startup behavior follows con
 
 ### 12.3 Factory Reset
 
-Factory reset is the most visually severe action. It requires Administrator permission, re-authentication when supported, and typed confirmation using the device name or serial suffix. The dialog lists erased categories and states that relays restart off. Never combine factory reset with restart in one ambiguous control.
+Factory reset is not a remote web action on this product. The Maintenance route MUST explain the required physical BOOT-button gesture and the erased categories, but MUST NOT render an enabled reset control or call a reset endpoint. The firmware MUST reject any attempted remote reset route. Never combine physical-reset guidance with restart in one ambiguous control.
 
 ## 13. API Contract
 
@@ -402,19 +442,29 @@ The frontend consumes a versioned, same-origin JSON API under `/api/v1`. The exa
 - Every response includes `X-Request-Id`; mutating responses include a correlation ID.
 - State snapshots include `apiVersion`, `deviceId`, `bootId`, and monotonic `snapshotSequence`.
 - Timestamps use RFC 3339 UTC when wall time is valid; monotonic age/sequence remains available when it is not.
-- State-changing requests use `Content-Type: application/json`, CSRF protection, payload limits, and idempotency keys.
+- State-changing requests use `Content-Type: application/json` except binary firmware transfer, and always use CSRF protection, payload limits, and idempotency keys where the operation is retry-sensitive.
+- The JWT cookie is sent by the browser; JavaScript never handles its value. Every mutation also sends `X-CSRF-Token` and is rejected unless `Origin` and `Host` match the provisioned device identity.
 - Unknown response fields are ignored for forward compatibility; missing required fields fail safely.
 - Values exceeding JavaScript's safe integer range are encoded as decimal strings.
 - The API returns `Cache-Control: no-store` for authentication, state, configuration, and diagnostics.
 
-Minimum endpoints:
+Canonical endpoint registry; capability-gated rows are registered only when their complete firmware service is enabled:
 
 | Method and path | Purpose |
 |---|---|
 | `POST /api/v1/session` | Sign in |
+| `GET /api/v1/session` | Current identity, permissions, expiry, and CSRF state |
 | `DELETE /api/v1/session` | Sign out |
 | `GET /api/v1/capabilities` | Hardware, features, limits, API compatibility, permissions |
 | `GET /api/v1/device` | Identity, lifecycle, firmware, connection facts |
+| `GET /api/v1/network` | Redacted current network status |
+| `GET /api/v1/network/wifi` | Redacted profile, recovery AP, and bounded scan state |
+| `POST /api/v1/network/wifi/scan` | Start one asynchronous scan |
+| `PUT /api/v1/network/wifi/profiles/{index}` | Validate and persist one of three Wi-Fi profiles |
+| `DELETE /api/v1/network/wifi/profiles/{index}` | Delete a profile and compact priority order using expected generation |
+| `POST /api/v1/network/wifi/profiles/{index}/move` | Move a complete stored profile to a new priority using expected generation |
+| `POST /api/v1/network/wifi/profiles/{index}/connect` | Begin an asynchronous connection attempt to one enabled profile |
+| `PUT /api/v1/network/wifi/recovery-ap` | Validate and persist recovery-AP policy using expected generation |
 | `GET /api/v1/relays` | Authoritative channel snapshot |
 | `POST /api/v1/relays/{id}/commands` | Submit set/toggle command |
 | `POST /api/v1/relays/commands` | Validated multi-channel command, including all-off |
@@ -422,11 +472,21 @@ Minimum endpoints:
 | `PUT /api/v1/configuration` | Validate and persist configuration using `If-Match` |
 | `GET /api/v1/protocols` | Modbus and KNX status/counters |
 | `GET /api/v1/diagnostics` | Bounded diagnostic snapshot |
-| `GET /api/v1/events` | Server-Sent Events stream |
-| `POST /api/v1/firmware/validate` | Validate update metadata/signature |
-| `POST /api/v1/firmware` | Upload approved firmware image |
+| `GET /api/v1/ws` | Authenticated versioned WebSocket live channel; REST remains authoritative for snapshots and recovery |
+| `GET /api/v1/users` | List redacted user profiles; Administrator only |
+| `POST /api/v1/users` | Create administrator or guest profile |
+| `PUT /api/v1/users/{id}` | Change role, enabled state, or write-only password |
+| `GET /api/v1/firmware/status` | Authoritative update state and rollback facts |
+| `POST /api/v1/firmware/validate` | Validate local update metadata before transfer |
+| `POST /api/v1/firmware/upload` | Stream a validated signed `.bin` to the inactive slot |
+| `POST /api/v1/firmware/check` | Fetch approved remote release metadata over HTTPS |
+| `POST /api/v1/firmware/remote` | Retrieve and install the matching signed environment binary |
 | `POST /api/v1/actions/restart` | Controlled restart |
-| `POST /api/v1/actions/factory-reset` | Factory reset |
+
+Endpoints for unsupported or unfinished capabilities MUST return `404 Not
+Found`, and their capability flags/permissions MUST be absent. They MUST NOT
+return placeholder success. `/api/v1/actions/factory-reset` is permanently
+absent under the physical-presence policy.
 
 ### 13.2 Capability Discovery
 
@@ -439,10 +499,15 @@ The app MUST fetch capabilities before rendering protected operational controls.
 	"model": "Waveshare ESP32-S3-Relay-6CH",
 	"channelCount": 6,
 	"features": {
+		"wifi": true,
+		"ethernet": false,
 		"modbus": true,
 		"knx": false,
-		"webUpdate": true,
-		"contactFeedback": false
+		"scenes": false,
+		"timers": false,
+		"remoteRestart": false,
+		"remoteFactoryReset": false,
+		"firmwareUpdate": false
 	},
 	"limits": {
 		"channelNameBytes": 32,
@@ -454,6 +519,10 @@ The app MUST fetch capabilities before rendering protected operational controls.
 ```
 
 This example is illustrative, not a hard-coded fallback. An absent/invalid capability response puts the UI in incompatible read-only state. The UI MUST create channel controls from `channelCount` and channel descriptors returned by the device.
+
+`firmwareUpdate` MUST remain false until signature verification, inactive-slot
+streaming, interruption handling, rollback, and post-boot health confirmation
+pass HIL. Rendering a development preview workflow does not satisfy this gate.
 
 ### 13.3 Relay Command
 
@@ -497,7 +566,7 @@ Never render server messages as HTML. Branch behavior on stable `code`, not loca
 
 ### 13.4 Live Updates
 
-Use same-origin Server-Sent Events by default because state flow is primarily device-to-browser and SSE is simpler to operate on constrained firmware. WebSocket MAY replace it only with measured resource justification.
+Use the authenticated same-origin WebSocket selected by `adr-0001-websocket-live-transport.md`. REST remains authoritative for initial snapshots, configuration forms, uploads, and sequence-gap recovery; bounded polling is the fallback.
 
 Event types include `device`, `relay`, `protocol`, `fault`, `configuration`, and `update`. Every event includes `bootId` and sequence. On gap, parse failure, boot ID change, or reconnect, discard assumptions and refetch snapshots. Keepalive comments SHOULD occur every 15-30 seconds through proxies.
 
@@ -507,19 +576,24 @@ Reconnection uses exponential backoff with jitter, for example 1, 2, 4, 8, 15, t
 
 ### 14.1 Technology
 
-Recommended stack:
+Approved stack:
 
 - TypeScript with `strict` mode;
 - React and Vite for the build;
 - React Router for route ownership;
 - TanStack Query for server state, retries, invalidation, and mutations;
-- React Hook Form plus Zod for forms and runtime boundary validation;
-- CSS Modules or a small token-based stylesheet;
+- Zod for runtime boundary validation; React Hook Form MAY be added for complex configuration forms after bundle and license review;
+- the existing small token-based stylesheet; CSS Modules MAY be introduced incrementally without visual redesign;
 - Vitest and Testing Library;
 - Playwright for browser and visual workflow tests;
 - Mock Service Worker for API contract scenarios.
 
 Dependencies MUST be pinned through the lockfile, license-reviewed, vulnerability-scanned, and justified against embedded bundle cost. Do not add a large component suite or global state library unless measured complexity requires it.
+
+The current repository uses React, React Router, TanStack Query, Zod, Lucide,
+Vitest, Testing Library, and a token stylesheet. Playwright, Mock Service Worker,
+axe integration, message catalogs, and route-level lazy loading are required
+production work, not implied existing capabilities.
 
 If firmware flash/RAM budgets cannot support this stack, ship precompressed static output or select a smaller framework in an ADR while preserving all contracts, accessibility, and test requirements.
 
@@ -580,7 +654,7 @@ Place route-level error boundaries around operational areas. A failed diagnostic
 
 ## 15. Embedded Delivery and Performance
 
-The production build is served same-origin by the device as immutable, content-hashed assets plus a non-cacheable HTML shell. Prefer Brotli when supported and retain gzip fallback.
+The production build is served same-origin by the device as immutable, content-hashed assets plus a non-cacheable HTML shell. Build first to `web/dist/`, then use a deterministic manifest/allowlist packager to clean and populate committed `data/www/`. CI MUST reject stale, extra, or non-reproducible generated assets. Prefer Brotli when supported and retain gzip fallback.
 
 Initial budgets, measured compressed over the wire:
 
@@ -592,7 +666,7 @@ Initial budgets, measured compressed over the wire:
 | Locally subset fonts | 50 KiB total |
 | Total first load | 220 KiB gzip |
 
-The relay route and shell load eagerly. Protocols, diagnostics, settings, maintenance, update code, and nonessential icon sets load by route. Avoid animation libraries, chart libraries for simple counters, date libraries where `Intl` suffices, and broad utility imports.
+The relay route and shell load eagerly. Protocols, diagnostics, settings, maintenance, update code, and nonessential icon sets MUST load through route-level lazy chunks. Avoid animation libraries, chart libraries for simple counters, date libraries where `Intl` suffices, and broad utility imports.
 
 Performance requirements on the minimum supported phone and desktop browser:
 
@@ -649,6 +723,9 @@ All display strings live in a message catalog even if the first release ships on
 - Rate-limit sign-in and sensitive actions server-side; frontend cooldown is only feedback.
 - Protect against clickjacking and prohibit embedding the console in frames.
 - HTTPS is REQUIRED on untrusted networks. If constrained deployments permit HTTP on an isolated commissioning network, the UI MUST show a persistent `Connection not secure` warning and the threat model must document it.
+- Authenticated production routes MUST use device-local HTTPS. Recovery-AP HTTP MUST expose only physically authorized provisioning and non-sensitive health; it MUST NOT accept credentials, JWT cookies, relay commands, configuration, user management, diagnostics detail, or firmware.
+- JWT verification MUST allow only HS256, validate issuer/device, subject, permission version, `iat`, `exp`, `jti`, and signing generation, and consult bounded revocation/session state. Algorithm negotiation from an untrusted token is prohibited.
+- Production firmware SHOULD enable secure boot, flash encryption, and encrypted NVS where supported by manufacturing. If any is unavailable, the release threat model MUST state the physical-access limitation and signing/private-key handling consequence.
 - Dependency updates require lockfile review, tests, license review, and software bill of materials generation.
 
 ## 19. Testing and Quality Gates
@@ -679,8 +756,8 @@ Playwright tests run at desktop (1440 by 900), tablet (768 by 1024), and mobile 
 6. Edit Modbus settings, review restart impact, persist, restart, and reconnect.
 7. Resolve a configuration generation conflict without overwriting newer data.
 8. Navigate and operate the full relay page using keyboard only.
-9. Complete firmware validation/update and verify new version or rollback.
-10. Attempt factory reset with insufficient permission and with authorized typed confirmation.
+9. Complete local upload and remote-release firmware validation/update, then verify new version or rollback.
+10. Verify factory reset has no web endpoint/control and that the Maintenance route shows the physical-presence procedure.
 
 ### 19.3 Visual and Accessibility Tests
 
@@ -724,12 +801,17 @@ During development, the frontend uses a contract-accurate mock server containing
 ## 21. Delivery Phases
 
 1. **Contract and shell.** Define versioned OpenAPI/JSON schemas, capability discovery, authentication, application shell, tokens, responsive navigation, and mock scenarios.
-2. **Relay operations.** Implement authoritative snapshots, SSE reconciliation, command idempotency, relay grid, channel detail, offline handling, and safety states.
+2. **Relay operations.** Implement authoritative snapshots, WebSocket reconciliation, command idempotency, relay grid, channel detail, offline handling, and safety states.
 3. **Configuration and protocols.** Add validated settings, generation conflicts, Modbus workspace, KNX capability/bindings, and controlled restart.
-4. **Diagnostics and maintenance.** Add event diagnostics, support export, firmware update, rollback visibility, restart, and factory reset.
+4. **Diagnostics and maintenance.** Add event diagnostics, support export, firmware update, rollback visibility, restart, and physical factory-reset guidance.
 5. **Production hardening.** Complete accessibility, localization readiness, CSP/security review, embedded bundle budgets, firmware packaging, soak tests, and hardware/browser verification.
 
 Each phase MUST be independently releasable behind firmware capabilities. Do not expose placeholder controls for unsupported or unfinished operations.
+
+Current status is: phase 1 partial at the frontend level, phase 2 partial,
+phase 3 partial, phase 4 UI contract only, and phase 5 not started. The complete
+phase-by-phase engineering ledger is maintained in `design/fontend-plan.md`.
+No phase is considered released merely because a preview UI exists.
 
 ## 22. Definition of Done
 
@@ -749,15 +831,20 @@ The frontend is production-ready only when:
 - all unit, contract, end-to-end, visual, accessibility, security, and firmware-packaging gates pass;
 - firmware remains safe and field-bus responsive when the web client is disconnected, stale, malformed, or under load.
 
-## 23. Required Decisions Before Implementation
+## 23. Resolved Decisions and Required Release Evidence
 
-Record ADRs or approved product decisions for:
+Section 1.1 is the approved production profile. ADRs MUST record those decisions
+and their measured alternatives; they do not reopen them during implementation.
 
-1. Whether the production hardware has a network interface and whether web delivery is always enabled or a build feature.
-2. HTTPS provisioning, certificate trust, hostname discovery, and isolated-HTTP commissioning policy.
-3. Authentication, initial credential provisioning, roles/permissions, session timeout, and recovery.
-4. Final API schema, SSE resource limits, idempotency retention, and UI/API compatibility window.
-5. Frontend framework, embedded asset storage, compression, flash/RAM budgets, and license policy.
-6. Supported browsers and minimum mobile/desktop hardware.
-7. Firmware update transport, maximum image size, signing, rollback, and browser-interruption behavior.
-8. Localization languages and whether device-local wall time is available.
+Before production release, the repository MUST contain and CI/HIL MUST verify:
+
+1. A canonical OpenAPI 3.1 contract plus generated/checked C++ DTO and Zod schema fixtures with an explicit API/UI compatibility window.
+2. PsychicHttpsServer 3.1.2 no-PSRAM measurements for TLS handshake, two authenticated WebSocket clients, Wi-Fi reconnect, malformed traffic, and simultaneous relay/Modbus/KNX load.
+3. Protected-NVS provisioning, credential recovery, JWT expiry/revocation, CSRF, Origin/Host, brute-force, and permission-denial evidence.
+4. Certificate enrollment/rotation and hostname/fingerprint verification procedures.
+5. A deterministic asset manifest with content type, encoding, byte length, hash, UI version, and minimum API version; clean rebuild drift must fail CI.
+6. Pinned partition-table identity and gates below 90 percent of each `0x330000` OTA app slot and below 85 percent of LittleFS.
+7. Offline release-signing key custody, public-key rotation, secure-version policy, image/product/hardware/`PIOENV` validation, interruption tests, rollback, and post-boot health evidence.
+8. Playwright/axe/manual evidence for supported browsers, 320 px, 200 percent zoom, keyboard, screen reader, reduced motion, high contrast, and 30 percent text expansion.
+9. Dependency audit, license report, SBOM, firmware/static packaging check, and 24-hour concurrency/reconnect soak.
+10. Operator documentation for build, first provisioning, certificate trust, user recovery, firmware update, rollback, physical factory reset, and safe field rollback.

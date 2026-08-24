@@ -1,0 +1,1 @@
+#include "../unit/test_knx_configuration.cpp"

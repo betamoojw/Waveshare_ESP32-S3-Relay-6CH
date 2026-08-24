@@ -63,6 +63,109 @@ export const networkSchema = z.object({
   lastConnectedAgeMs: z.number().int().nonnegative().nullable(),
 })
 
+export const wifiProfileSchema = z.object({
+  index: z.number().int().min(0).max(2),
+  enabled: z.boolean(),
+  ssid: z.string().max(32),
+  hasPassphrase: z.boolean(),
+  ipv4: z.object({
+    mode: z.enum(['dhcp', 'static']),
+    address: z.string(),
+    subnetMask: z.string(),
+    gateway: z.string(),
+    dns: z.string(),
+  }),
+})
+
+export const wifiManagementSchema = z.object({
+  generation: z.number().int().nonnegative(),
+  activeProfileIndex: z.number().int().min(0).max(2).nullable(),
+  scan: z.object({
+    state: z.enum(['idle', 'scanning', 'complete', 'failed']),
+    sequence: z.number().int().nonnegative(),
+    results: z.array(z.object({
+      ssid: z.string().max(32),
+      rssi: z.number().int(),
+      channel: z.number().int().min(1).max(14),
+      secured: z.boolean(),
+    })).max(16),
+  }),
+  profiles: z.array(wifiProfileSchema).max(3),
+  recoveryAp: z.object({
+    enabled: z.boolean(),
+	ssidPrefix: z.string().min(1).max(23),
+	channel: z.number().int().min(1).max(13),
+	timeoutMs: z.number().int().nonnegative(),
+	remainActiveWhileOffline: z.boolean(),
+    active: z.boolean(),
+  }),
+})
+
+export const modbusConfigurationSchema = z.object({
+  generation: z.number().int().nonnegative(),
+  role: z.enum(['server', 'client']),
+  unitId: z.number().int().min(1).max(247),
+  baudRate: z.union([z.literal(9600), z.literal(19200), z.literal(38400), z.literal(57600), z.literal(115200)]),
+  parity: z.enum(['none', 'even', 'odd']),
+  dataBits: z.literal(8),
+  stopBits: z.union([z.literal(1), z.literal(2)]),
+})
+
+const knxIndividualAddressSchema = z.string().regex(/^$|^(?:[0-9]|1[0-5])\.(?:[0-9]|1[0-5])\.(?:[0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$/)
+const knxGroupAddressSchema = z.string().regex(/^$|^(?:[0-9]|[12][0-9]|3[01])\/[0-7]\/(?:[0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$/)
+const knxPeriodicIntervalSchema = z.number().int().min(0).max(86_400_000).refine((value) => value === 0 || value >= 10_000)
+
+export const knxChannelConfigurationSchema = z.object({
+  index: z.number().int().min(0).max(5),
+  switchGroupAddress: knxGroupAddressSchema,
+  statusGroupAddress: knxGroupAddressSchema,
+  faultGroupAddress: knxGroupAddressSchema,
+  commandPolarityInverted: z.boolean(),
+  statusPolarityInverted: z.boolean(),
+  sendStatusAfterStartup: z.boolean(),
+  participatesInCentralSwitch: z.boolean(),
+  participatesInCentralOff: z.boolean(),
+})
+
+export const knxConfigurationSchema = z.object({
+  generation: z.number().int().nonnegative(),
+  enabled: z.boolean(),
+  individualAddress: knxIndividualAddressSchema,
+  startupTransmitDelayMs: z.number().int().min(0).max(60_000),
+  minimumTelegramIntervalMs: z.number().int().min(20).max(1000),
+  cyclicStatusIntervalMs: knxPeriodicIntervalSchema,
+  heartbeatIntervalMs: knxPeriodicIntervalSchema,
+  readSwitchObject: z.boolean(),
+  heartbeatGroupAddress: knxGroupAddressSchema,
+  centralSwitchGroupAddress: knxGroupAddressSchema,
+  centralOffGroupAddress: knxGroupAddressSchema,
+  deviceFaultGroupAddress: knxGroupAddressSchema,
+  channels: z.array(knxChannelConfigurationSchema).length(6),
+})
+
+export const userSchema = z.object({
+  id: z.number().int().nonnegative(),
+  username: z.string(),
+  role: z.enum(['administrator', 'guest']),
+  enabled: z.boolean(),
+})
+
+export const sessionSchema = z.object({
+  user: userSchema,
+  expiresInMs: z.number().int().positive(),
+  csrfToken: z.string(),
+  permissions: z.array(z.string()),
+})
+
+export const otaStatusSchema = z.object({
+  state: z.enum(['idle', 'checking', 'available', 'downloading', 'verifying', 'ready', 'installing', 'failed']),
+  progressPercent: z.number().min(0).max(100),
+  currentVersion: z.string(),
+  buildEnvironment: z.string(),
+  availableVersion: z.string().nullable(),
+  error: z.string().nullable(),
+})
+
 export const diagnosticsSchema = z.object({
   configurationValid: z.boolean(),
   persistenceHealthy: z.boolean(),
@@ -113,9 +216,31 @@ export const commandResultSchema = z.object({
   reason: z.string().optional(),
 })
 
+export const operationSchema = z.object({
+  operationId: z.string().regex(/^\d+$/),
+  status: z.enum(['pending', 'applied', 'conflict', 'invalid', 'unavailable', 'rejected']),
+})
+
 export type Capabilities = z.infer<typeof capabilitiesSchema>
 export type Device = z.infer<typeof deviceSchema>
 export type NetworkStatus = z.infer<typeof networkSchema>
+export type WifiManagement = z.infer<typeof wifiManagementSchema>
+export type WifiProfile = z.infer<typeof wifiProfileSchema>
+export type WifiRecoveryAp = WifiManagement['recoveryAp']
+export type ModbusConfiguration = z.infer<typeof modbusConfigurationSchema>
+export type ModbusConfigurationUpdate = Omit<ModbusConfiguration, 'generation' | 'role' | 'dataBits'> & {
+  expectedGeneration: number
+}
+export type KnxConfiguration = z.infer<typeof knxConfigurationSchema>
+export type KnxConfigurationUpdate = Omit<KnxConfiguration, 'generation'> & { expectedGeneration: number }
+export type WifiProfileUpdate = Omit<WifiProfile, 'hasPassphrase'> & {
+  expectedGeneration: number
+  passphrase?: string
+  clearPassphrase?: boolean
+}
+export type User = z.infer<typeof userSchema>
+export type Session = z.infer<typeof sessionSchema>
+export type OtaStatus = z.infer<typeof otaStatusSchema>
 export type Diagnostics = z.infer<typeof diagnosticsSchema>
 export type Relay = z.infer<typeof relaySchema>
 export type RelayList = z.infer<typeof relayListSchema>

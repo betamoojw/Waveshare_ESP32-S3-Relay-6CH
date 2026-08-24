@@ -248,9 +248,9 @@ CliInitializeResult CliAdapter::initialize() noexcept
 
 	auto *config = embeddedCliDefaultConfig();
 	config->invitation = "switch-actuator> ";
-	config->rxBufferSize = 128;
-	config->cmdBufferSize = 128;
-	config->historyBufferSize = 256;
+	config->rxBufferSize = 256;
+	config->cmdBufferSize = 256;
+	config->historyBufferSize = 0;
 	config->maxBindingCount = maximumBindings;
 	config->cliBuffer = buffer_.data();
 	config->cliBufferSize = bufferSize;
@@ -268,7 +268,7 @@ CliInitializeResult CliAdapter::initialize() noexcept
 	cli_->appContext = this;
 	cli_->writeChar = writeCharacter;
 	cli_->onCommand = unknownCommand;
-	const std::array<CliCommandBinding, 22> bindings{{
+	const std::array<CliCommandBinding, 24> bindings{{
 		{"version", "Firmware and CLI version", true, this, versionCommand},
 		{"status", "Machine-readable device status", true, this, statusCommand},
 		{"get-relay", "get-relay [all|0..5]", true, this, getRelayCommand},
@@ -291,6 +291,8 @@ CliInitializeResult CliAdapter::initialize() noexcept
 		{"load-config", "Load /config JSON files into validated active configuration", true, this, loadConfigCommand},
 		{"store-config", "Store active configuration into /config JSON files", true, this, storeConfigCommand},
 		{"reboot", "Request a controlled restart", true, this, rebootCommand},
+		{"provision-web", "provision-web [username] [password]", true, this, provisionWebCommand},
+		{"mfg-test", "mfg-test [snapshot|button|relay|rgb|buzzer|safe]", true, this, manufacturingTestCommand},
 	}};
 	for (const auto &binding : bindings)
 	{
@@ -512,11 +514,23 @@ void CliAdapter::rebootCommand(EmbeddedCli *, char *const arguments, void *const
 	static_cast<CliAdapter *>(context)->handleReboot(arguments);
 }
 
+void CliAdapter::provisionWebCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleProvisionWeb(arguments);
+	if (arguments != nullptr) std::fill_n(arguments, std::strlen(arguments), '\0');
+}
+
+void CliAdapter::manufacturingTestCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleManufacturingTest(arguments);
+}
+
 bool CliAdapter::dependenciesValid() const noexcept
 {
 	return dependencies_.stream != nullptr && dependencies_.switchingPolicy != nullptr && dependencies_.relayService != nullptr &&
 		   dependencies_.lifecycleSupervisor != nullptr && dependencies_.diagnostics != nullptr &&
-		   dependencies_.configurationService != nullptr && dependencies_.configurationFile.isValid() &&
+		   dependencies_.configurationService != nullptr && dependencies_.webSecurityService != nullptr &&
+		   dependencies_.configurationFile.isValid() &&
 		   dependencies_.statusIndicator != nullptr &&
 		   dependencies_.button != nullptr && dependencies_.networkManager != nullptr && dependencies_.modbus.isValid() &&
 		   dependencies_.clock.isValid();
@@ -625,6 +639,38 @@ void CliAdapter::printButton() noexcept
 		"ok=true initialized=%s pressed=%s",
 		dependencies_.button->isInitialized() ? "true" : "false",
 		dependencies_.button->isPressed() ? "true" : "false");
+	print(output);
+}
+
+void CliAdapter::printManufacturingSnapshot() noexcept
+{
+	const auto &configuration = dependencies_.configurationService->active();
+	const auto &relays = dependencies_.relayService->snapshots();
+	const auto &network = dependencies_.networkManager->statusPort().snapshot();
+	const auto role = dependencies_.modbus.role(dependencies_.modbus.context);
+	char output[640]{};
+	std::snprintf(output,
+		sizeof(output),
+		"ok=true interface=manufacturing version=1 model=%s hardware_revision=%s serial=%s generation=%lu authorized=%s "
+		"relay_initialized=%s indicator_initialized=%s button_initialized=%s button_pressed=%s network_state=%u "
+		"modbus_role=%s relays=[%u,%u,%u,%u,%u,%u]",
+		configuration.boardModel.data(),
+		configuration.hardwareRevision.data(),
+		configuration.deviceSerial.data(),
+		static_cast<unsigned long>(configuration.generation),
+		maintenanceAuthorized_ ? "true" : "false",
+		dependencies_.relayService->isInitialized() ? "true" : "false",
+		dependencies_.statusIndicator->isInitialized() ? "true" : "false",
+		dependencies_.button->isInitialized() ? "true" : "false",
+		dependencies_.button->isPressed() ? "true" : "false",
+		static_cast<unsigned int>(network.state),
+		role == ports::ModbusRtuRole::Server ? "server" : "client",
+		static_cast<unsigned int>(relays[0].appliedState == domain::RelayState::On),
+		static_cast<unsigned int>(relays[1].appliedState == domain::RelayState::On),
+		static_cast<unsigned int>(relays[2].appliedState == domain::RelayState::On),
+		static_cast<unsigned int>(relays[3].appliedState == domain::RelayState::On),
+		static_cast<unsigned int>(relays[4].appliedState == domain::RelayState::On),
+		static_cast<unsigned int>(relays[5].appliedState == domain::RelayState::On));
 	print(output);
 }
 
@@ -813,6 +859,101 @@ void CliAdapter::handleBuzzer(char *const arguments) noexcept
 	const auto duty = dependencies_.configurationService->active().indicators.maximumBuzzerDutyPercent;
 	const auto result = dependencies_.statusIndicator->playMaintenanceTone(tone, duty, dependencies_.clock.nowMs());
 	print(result == indicators::IndicatorResult::Applied ? "ok=true result=applied" : "ok=false error=indicator-unavailable");
+}
+
+void CliAdapter::handleManufacturingTest(char *const arguments) noexcept
+{
+	const auto tokenCount = embeddedCliGetTokenCount(arguments);
+	const auto *operation = embeddedCliGetToken(arguments, 1);
+	if (tokenCount == 1 && operation != nullptr && std::strcmp(operation, "snapshot") == 0)
+	{
+		printManufacturingSnapshot();
+		return;
+	}
+	if (tokenCount == 1 && operation != nullptr && std::strcmp(operation, "button") == 0)
+	{
+		printButton();
+		return;
+	}
+	const auto recognizedMutation = operation != nullptr &&
+		(std::strcmp(operation, "relay") == 0 || std::strcmp(operation, "rgb") == 0 ||
+		 std::strcmp(operation, "buzzer") == 0 || std::strcmp(operation, "safe") == 0);
+	if (!recognizedMutation)
+	{
+		print("ok=false error=usage usage=mfg-test_[snapshot|button|relay|rgb|buzzer|safe]");
+		return;
+	}
+	if (!mutatingCommandAllowed())
+	{
+		print("ok=false error=maintenance-authorization-required");
+		return;
+	}
+	if (tokenCount == 3 && operation != nullptr && std::strcmp(operation, "relay") == 0)
+	{
+		std::uint8_t channel{0};
+		domain::RelayAction action{};
+		if (!parseChannel(embeddedCliGetToken(arguments, 2), channel) ||
+			!parseState(embeddedCliGetToken(arguments, 3), action))
+		{
+			print("ok=false error=invalid-relay-test");
+			return;
+		}
+		app::RelayCommandBatch batch{};
+		batch.count = 1;
+		batch.commands[0] = {{channel}, action, domain::CommandSource::Cli, nextCorrelationId(), dependencies_.clock.nowMs()};
+		static_cast<void>(enqueueRelayBatch(batch));
+		return;
+	}
+	if ((tokenCount == 4 || tokenCount == 5) && operation != nullptr && std::strcmp(operation, "rgb") == 0)
+	{
+		std::uint8_t red{0};
+		std::uint8_t green{0};
+		std::uint8_t blue{0};
+		std::uint8_t brightness = dependencies_.configurationService->active().indicators.maximumBrightness;
+		if (!parseUint8(embeddedCliGetToken(arguments, 2), 255, red) ||
+			!parseUint8(embeddedCliGetToken(arguments, 3), 255, green) ||
+			!parseUint8(embeddedCliGetToken(arguments, 4), 255, blue) ||
+			(tokenCount == 5 && !parseUint8(embeddedCliGetToken(arguments, 5), 255, brightness)))
+		{
+			print("ok=false error=invalid-rgb-test");
+			return;
+		}
+		const auto result = dependencies_.statusIndicator->setMaintenanceColor(red, green, blue, brightness,
+			dependencies_.configurationService->active().indicators.maximumBrightness, dependencies_.clock.nowMs());
+		print(result == indicators::IndicatorResult::Applied ? "ok=true result=applied test=rgb" :
+			"ok=false error=indicator-unavailable");
+		return;
+	}
+	if (tokenCount == 2 && operation != nullptr && std::strcmp(operation, "buzzer") == 0)
+	{
+		std::uint8_t tone{0};
+		if (!parseUint8(embeddedCliGetToken(arguments, 2), 7, tone))
+		{
+			print("ok=false error=invalid-buzzer-test");
+			return;
+		}
+		const auto result = dependencies_.statusIndicator->playMaintenanceTone(tone,
+			dependencies_.configurationService->active().indicators.maximumBuzzerDutyPercent,
+			dependencies_.clock.nowMs());
+		print(result == indicators::IndicatorResult::Applied ? "ok=true result=applied test=buzzer" :
+			"ok=false error=indicator-unavailable");
+		return;
+	}
+	if (tokenCount == 1 && operation != nullptr && std::strcmp(operation, "safe") == 0)
+	{
+		app::RelayCommandBatch batch{};
+		batch.count = domain::relayChannelCount;
+		const auto nowMs = dependencies_.clock.nowMs();
+		for (std::uint8_t channel = 0; channel < domain::relayChannelCount; ++channel)
+		{
+			batch.commands[channel] = {{channel}, domain::RelayAction::SetOff, domain::CommandSource::Cli,
+				nextCorrelationId(), nowMs};
+		}
+		dependencies_.statusIndicator->clearMaintenanceOverride();
+		static_cast<void>(enqueueRelayBatch(batch));
+		return;
+	}
+	print("ok=false error=usage usage=mfg-test_[snapshot|button|relay|rgb|buzzer|safe]");
 }
 
 void CliAdapter::handleSetModbusRole(char *const arguments) noexcept
@@ -1353,5 +1494,67 @@ void CliAdapter::handleReboot(char *const arguments) noexcept
 		return;
 	}
 	print("ok=false error=invalid-lifecycle");
+}
+
+void CliAdapter::handleProvisionWeb(char *const arguments) noexcept
+{
+	if (!mutatingCommandAllowed())
+	{
+		print("ok=false error=not-authorized");
+		return;
+	}
+	if (dependencies_.configurationService->active().web.securityProvisioned)
+	{
+		print("ok=false error=already-provisioned");
+		return;
+	}
+	if (embeddedCliGetTokenCount(arguments) != 2)
+	{
+		print("ok=false error=usage usage=provision-web_[username]_[password]");
+		return;
+	}
+	const auto *username = embeddedCliGetToken(arguments, 1);
+	const auto *password = embeddedCliGetToken(arguments, 2);
+	const auto &active = dependencies_.configurationService->active();
+	char hostName[96]{};
+	if (std::snprintf(hostName, sizeof(hostName), "%s.local", active.network.hostName.data()) <= 0)
+	{
+		print("ok=false error=invalid-hostname");
+		return;
+	}
+	const auto provision = dependencies_.webSecurityService->provisionInitialAdministrator(username, password, hostName);
+	if (provision != app::WebUserManagementResult::Applied)
+	{
+		print(provision == app::WebUserManagementResult::Invalid ? "ok=false error=invalid-credentials" :
+			provision == app::WebUserManagementResult::PersistenceFailure ? "ok=false error=persistence-failure" :
+			"ok=false error=crypto-failure");
+		return;
+	}
+	auto replacement = active;
+	replacement.web.securityProvisioned = true;
+	dependencies_.configurationService->discardStaged();
+	const auto staged = dependencies_.configurationService->stage(replacement);
+	const auto committed = staged == app::ConfigurationStageResult::Staged ?
+		dependencies_.configurationService->commit() : app::ConfigurationCommitResult::NothingStaged;
+	if (committed != app::ConfigurationCommitResult::Committed &&
+		committed != app::ConfigurationCommitResult::CommittedRestartRequired)
+	{
+		dependencies_.configurationService->discardStaged();
+		static_cast<void>(dependencies_.webSecurityService->erase());
+		print("ok=false error=persistence-failure");
+		return;
+	}
+	dependencies_.diagnostics->updateConfiguration(true,
+		dependencies_.configurationService->active().generation,
+		dependencies_.configurationService->lastLoadResult(),
+		dependencies_.configurationService->lastSaveResult());
+	const auto restart = dependencies_.lifecycleSupervisor->requestRestart(dependencies_.clock.nowMs());
+	if (restart == app::LifecycleResult::InvalidTransition || restart == app::LifecycleResult::InvalidEventSink)
+	{
+		print("ok=false error=restart-unavailable");
+		return;
+	}
+	maintenanceAuthorized_ = false;
+	print("ok=true result=web-provisioned restart_required=true");
 }
 }

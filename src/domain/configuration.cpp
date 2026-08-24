@@ -87,8 +87,20 @@ template <std::size_t Capacity>
 [[nodiscard]] bool isValidNetworkConfiguration(const NetworkConfiguration &configuration) noexcept
 {
 	const auto hasText = [](const auto &text) { return hasBoundedText(text); };
-	const auto hasAddress = [](const auto &address) {
-		return std::any_of(address.begin(), address.end(), [](const auto octet) { return octet != 0; });
+	const auto toIpv4 = [](const auto &address) {
+		return (static_cast<std::uint32_t>(address[0]) << 24U) |
+			(static_cast<std::uint32_t>(address[1]) << 16U) |
+			(static_cast<std::uint32_t>(address[2]) << 8U) | static_cast<std::uint32_t>(address[3]);
+	};
+	const auto hasValidStaticIpv4 = [&toIpv4](const Ipv4Configuration &ipv4) {
+		const auto address = toIpv4(ipv4.address);
+		const auto subnetMask = toIpv4(ipv4.subnetMask);
+		const auto gateway = toIpv4(ipv4.gateway);
+		const auto dns = toIpv4(ipv4.dns);
+		const auto invertedMask = ~subnetMask;
+		const auto maskIsContiguous = subnetMask != 0 && (invertedMask & (invertedMask + 1U)) == 0;
+		return address != 0 && gateway != 0 && dns != 0 && maskIsContiguous &&
+			(address & subnetMask) == (gateway & subnetMask);
 	};
 	if (!hasText(configuration.hostName) || !hasText(configuration.recoveryAp.ssidPrefix) ||
 		configuration.recoveryAp.channel == 0 || configuration.recoveryAp.channel > 13)
@@ -104,8 +116,7 @@ template <std::size_t Capacity>
 		}
 		if (!hasText(profile.ssid) || !hasText(profile.passphrase) ||
 			(profile.ipv4.mode != IpMode::Dhcp && profile.ipv4.mode != IpMode::Static) ||
-			(profile.ipv4.mode == IpMode::Static && (!hasAddress(profile.ipv4.address) ||
-				!hasAddress(profile.ipv4.subnetMask) || !hasAddress(profile.ipv4.gateway) || !hasAddress(profile.ipv4.dns))))
+			(profile.ipv4.mode == IpMode::Static && !hasValidStaticIpv4(profile.ipv4)))
 		{
 			return false;
 		}

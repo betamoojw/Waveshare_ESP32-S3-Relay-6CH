@@ -78,6 +78,14 @@ Static IPv4 configuration MUST contain address, subnet mask, gateway, and at lea
 
 Wi-Fi credentials, recovery-AP passphrases, and management passwords are secrets. They MUST NOT be logged, returned by an unauthenticated endpoint, included in diagnostic exports, or exposed in configuration readback. Browser/API updates that omit a secret MUST preserve the existing value unless an explicit clear operation is requested.
 
+### 5.1 Wi-Fi Management Operations
+
+`WifiManagementService` is the application owner for redacted Wi-Fi snapshots and configuration mutations. All management transports, including HTTPS, CLI, and Improv provisioning, MUST use this boundary and `ConfigurationService`; they MUST NOT independently copy, validate, or persist credentials. The service SHALL support profile create/update, enable/disable, explicit secret replacement/clear, deletion with priority compaction, priority move, and recovery-AP policy update. Every persisted mutation MUST compare the caller's expected active generation before staging. A stale generation changes nothing and returns a conflict.
+
+`NetworkManager` remains the sole radio owner. After persistence succeeds it SHALL support controlled apply and connect-selected-profile operations without restarting relay control. A connect operation means “connection attempt started”; online state is reported only by a later authoritative network snapshot. Persistence failure MUST leave both active configuration and radio operation unchanged.
+
+Readback contains only profile index, enabled state, SSID subject to permission, `hasPassphrase`, IP policy, active profile index, generation, recovery-AP policy/state, and bounded scan state. Profile moves preserve the complete stored profile, including its secret. Profile deletion clears the vacated final slot and its secret.
+
 ## 6. Connectivity State Machine
 
 The manager MUST publish one snapshot with a monotonically increasing state sequence. The snapshot shall include lifecycle state, active transport, link status, IP configuration status, IPv4 address, gateway, DNS servers, RSSI for Wi-Fi, active profile index, recovery-AP state, last failure reason, and timestamps for state change and successful connection.
@@ -128,6 +136,13 @@ The recovery AP is for local commissioning and repair, not normal operation.
 - The recovery AP MUST expose only the minimum provisioning, diagnostics, and firmware-recovery endpoints; KNX/IP and relay-control APIs MUST remain unavailable through it unless explicitly enabled by an authenticated commissioning policy.
 - A configuration change submitted through provisioning MUST be validated, atomically persisted, and then trigger a controlled network reconfiguration. It MUST NOT reboot the relay application merely to apply credentials.
 - The AP MAY remain active while there is no usable infrastructure connection. Once infrastructure networking is stable, it SHOULD stop after the configured timeout unless explicitly configured to remain active for commissioning.
+- `remainActiveWhileOffline=true` keeps the AP available until infrastructure succeeds. When false, a nonzero `timeoutMs` closes it after the commissioning window while bounded station retries continue. `timeoutMs=0` disables this offline timeout.
+
+### 6.3 Scan and Management API Behavior
+
+Only one asynchronous scan may be active. The manager retains at most 16 results and publishes `idle`, `scanning`, `complete`, or `failed` with a monotonically increasing scan sequence. Scanning MUST NOT disconnect an established station or block relay/protocol scheduling.
+
+The authenticated infrastructure HTTPS API uses `/api/v1/network/wifi`, `/scan`, `/profiles/{index}`, `/profiles/{index}/move`, `/profiles/{index}/connect`, and `/recovery-ap` as specified by `design/fontend-instructions.md`. Mutations require Administrator permission, exact Origin/Host checks, CSRF, bounded JSON, rate limiting, and no-store responses. Invalid index maps to `404`, invalid configuration to `422`, stale generation or conflicting operation to `409`, and persistence/radio unavailability to `503`. No operational relay, user, normal configuration, detailed diagnostics, KNX/IP, or OTA route is exposed on the recovery AP.
 
 ## 7. IP Services and Discovery
 
@@ -182,6 +197,9 @@ The implementation is complete only when automated tests and hardware validation
 - DHCP and valid static IPv4 configurations work for each supported transport, while incomplete or invalid static settings are rejected before persistence;
 - dependent services do not start before a usable network state and recover correctly across transport changes;
 - credentials never appear in serial logs, diagnostics, unauthenticated API responses, or exported configuration;
+- save preserves an omitted secret, explicit replacement/clear behave distinctly, stale generations do not write, deletion compacts order and erases the final secret, and persistence failure leaves active state unchanged;
+- scanning remains bounded and asynchronous; connect-now starts only an enabled stored profile and does not report online before association and IP acquisition complete;
+- recovery-AP timeout and remain-active behavior match configuration while station retries continue;
 - malformed network traffic and repeated reconnect events do not block the application task, exhaust queues, or bypass `SwitchingPolicyService`;
 - the Waveshare board reports Ethernet as unavailable unless a verified Ethernet-capable board descriptor is selected.
 

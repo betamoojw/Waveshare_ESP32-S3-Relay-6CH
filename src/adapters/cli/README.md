@@ -14,6 +14,31 @@ Mutating commands require all of the following:
 
 The adapter responds with `error=not-authorized` or `error=maintenance-authorization-required` when this gate is not satisfied. Maintenance authorization is cleared at CLI initialization and during factory reset.
 
+## Initial Web Provisioning
+
+Web security is provisioned only over the local serial console after physical
+BOOT-button authorization. Hold BOOT for at least 3 seconds and release before
+the 10-second factory-reset threshold, then run:
+
+```text
+provision-web [username] [password]
+```
+
+The password must contain 12 through 128 non-whitespace characters. CLI command
+history is disabled, the parsed command buffer is cleared after execution, and
+the password is never echoed. The device generates its P-256 private key,
+self-signed SHA-256 certificate, JWT signing key, salt, and password verifier
+locally from the ESP32 hardware RNG. Private material is persisted only in the
+protected `web_security` NVS namespace.
+
+Provisioning writes protected security state first and enables
+`web.securityProvisioned` only after the validated configuration commit
+succeeds. A failed configuration commit erases the new security record, so the
+web server remains fail-closed. Success requests a controlled restart and
+revokes maintenance authorization. The generated certificate contains the
+configured `<hostname>.local` DNS SAN; an administrator must explicitly trust
+that self-signed certificate on management clients.
+
 ## Configuration Files
 
 ```text
@@ -60,6 +85,10 @@ get-button
 ```
 
 `set-rgb` and `buzzer` are maintenance-only commands. The configured brightness and buzzer-duty limits remain enforced.
+
+## Manufacturing Test Interface
+
+Production fixtures use `mfg-test snapshot`, `button`, `relay`, `rgb`, `buzzer`, and `safe`. Snapshot and button operations are read-only. Mutating operations require local maintenance authorization; relay requests use the production command path and `safe` queues all channels off and clears indicator overrides. See `design/manufacturing-test-interface.md` for the normative sequence and external fixture requirements.
 
 ## Modbus RTU
 

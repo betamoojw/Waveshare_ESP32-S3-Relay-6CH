@@ -1,6 +1,11 @@
 #pragma once
 
 #include "configuration_service.h"
+#include "wifi_management_service.h"
+#include "web_event_journal.h"
+#include "web_security_service.h"
+#include "web_command_tracker.h"
+#include "web_request_queue.h"
 #include "diagnostics_service.h"
 #include "lifecycle_supervisor.h"
 #include "relay_command_queue.h"
@@ -21,7 +26,10 @@
 #include "../adapters/modbus/modbus_configuration_gateway.h"
 #include "../adapters/network/network_manager.h"
 #include "../adapters/nvs/nvs_settings_store.h"
+#include "../adapters/nvs/nvs_web_security_store.h"
 #include "../adapters/watchdog/esp32_task_watchdog.h"
+#include "../adapters/web/web_server_adapter.h"
+#include "../adapters/web/esp32_web_crypto.h"
 #include "../domain/relay_policy.h"
 
 #include <improv_wifi/serial_filter.h>
@@ -64,7 +72,9 @@ private:
 	[[nodiscard]] static domain::ResetCategory resetCategory() noexcept;
 	[[nodiscard]] bool applyRestorePlan(std::uint32_t nowMs) noexcept;
 	void handleWatchdogFailure(std::uint32_t nowMs) noexcept;
-	void processRelayCommand() noexcept;
+	void processRelayCommand(std::uint32_t nowMs) noexcept;
+	void processWebRequest(std::uint32_t nowMs) noexcept;
+	void publishWebStateEvents(std::uint32_t nowMs) noexcept;
 	void updateDiagnostics(std::uint32_t nowMs) noexcept;
 
 	DiagnosticsService diagnostics_{};
@@ -72,6 +82,9 @@ private:
 	adapters::bsp::Esp32RelayOutput relayOutput_;
 	CommandArbiter commandArbiter_{};
 	RelayCommandService relayService_;
+	WebEventJournal webEventJournal_{};
+	WebCommandTracker webCommandTracker_{};
+	WebRequestQueue webRequestQueue_{};
 	RelayCommandQueue commandQueue_{};
 	SwitchingPolicyService switchingPolicy_;
 	SceneService sceneService_;
@@ -79,7 +92,13 @@ private:
 	adapters::nvs::NvsSettingsStore settingsStore_{};
 	adapters::filesystem::LittleFsConfigurationSource defaultConfigurationSource_;
 	ConfigurationService configurationService_;
-	adapters::network::NetworkManager network_{adapters::bsp::waveshareEsp32S3Relay6Ch, configurationService_, Serial};
+	WifiManagementService wifiManagementService_{configurationService_};
+	adapters::nvs::NvsWebSecurityStore webSecurityStore_{};
+	adapters::web::Esp32WebCrypto webCrypto_{};
+	WebSecurityService webSecurityService_{webSecurityStore_.port(), webCrypto_.port(),
+		ports::ClockPort{monotonicMilliseconds, this}};
+	adapters::network::NetworkManager network_{adapters::bsp::waveshareEsp32S3Relay6Ch,
+		configurationService_, wifiManagementService_, Serial};
 	adapters::indicators::StatusIndicator statusIndicator_;
 	adapters::button::ButtonAdapter button_;
 	adapters::knx::KnxAdapter knx_;
@@ -89,6 +108,19 @@ private:
 	adapters::modbus::ModbusRtuAdapter modbusRtu_;
 	adapters::cli::CliAdapter cli_;
 	adapters::watchdog::Esp32TaskWatchdog watchdog_{};
+	adapters::web::WebServerAdapter webServer_{{&relayService_,
+		&switchingPolicy_,
+		&diagnostics_,
+		&configurationService_,
+		&wifiManagementService_,
+		&webEventJournal_,
+		network_.statusPort(),
+		network_.controlPort(),
+		modbusRtu_.controlPort(),
+		webSecurityService_.port(),
+		&webSecurityService_,
+		&webCommandTracker_,
+		&webRequestQueue_}};
 	improv_wifi_busware::SerialFilter serialFilter_{};
 	std::uint32_t lastRelayProcessAtMs_{0};
 	std::uint32_t lastModbusPollAtMs_{0};
@@ -96,8 +128,15 @@ private:
 	std::uint32_t lastCliPollAtMs_{0};
 	std::uint32_t lastIndicatorUpdateAtMs_{0};
 	std::uint32_t lastDiagnosticsUpdateAtMs_{0};
+	std::uint32_t lastPublishedNetworkSequence_{0};
+	std::uint32_t lastPublishedWifiScanSequence_{0};
+	std::uint32_t lastPublishedConfigurationGeneration_{0};
+	std::uint32_t diagnosticsEventSequence_{0};
+	std::uint32_t restartRequestedAtMs_{0};
+	bool restartPending_{false};
 	bool modbusAvailable_{false};
 	bool cliAvailable_{false};
+	bool webAvailable_{false};
 	bool initialized_{false};
 };
 }

@@ -18,6 +18,7 @@ constexpr std::uint32_t cliPollIntervalMs{10};
 constexpr std::uint32_t indicatorUpdateIntervalMs{20};
 constexpr std::uint32_t diagnosticsUpdateIntervalMs{1000};
 constexpr std::size_t maximumSerialInputBytesPerUpdate{64};
+constexpr std::uint32_t controlledRestartDrainMs{500};
 
 #ifdef FIRMWARE_VERSION
 constexpr std::string_view firmwareVersion{FIRMWARE_VERSION};
@@ -47,7 +48,8 @@ Application::Application() noexcept
 	  relayTimerService_{switchingPolicy_},
 	  defaultConfigurationSource_{adapters::configuration::embeddedDefaultConfigurationJson()},
 	  configurationService_{settingsStore_.port()},
-	  network_{adapters::bsp::waveshareEsp32S3Relay6Ch, configurationService_, Serial},
+	  wifiManagementService_{configurationService_},
+	  network_{adapters::bsp::waveshareEsp32S3Relay6Ch, configurationService_, wifiManagementService_, Serial},
 	  statusIndicator_{adapters::bsp::waveshareEsp32S3Relay6Ch},
 	  button_{adapters::bsp::waveshareEsp32S3Relay6Ch, handleButtonEvent, this},
 	  knx_{{&switchingPolicy_, &relayService_, &diagnostics_, ports::ClockPort{monotonicMilliseconds, this}, network_.statusPort()}},
@@ -79,6 +81,7 @@ Application::Application() noexcept
 		&lifecycle_,
 		&diagnostics_,
 		&configurationService_,
+		&webSecurityService_,
 		defaultConfigurationSource_.filePort(),
 		&statusIndicator_,
 		&button_,
@@ -94,7 +97,11 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	initialized_ = false;
 	modbusAvailable_ = false;
 	cliAvailable_ = false;
+	webAvailable_ = false;
 	commandQueue_.clear();
+	webEventJournal_.clear();
+	webCommandTracker_.clear();
+	webRequestQueue_.clear();
 	relayTimerService_.cancelAll();
 	sceneService_.disable();
 	if (resetCategory() == domain::ResetCategory::Watchdog)
@@ -185,6 +192,13 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	cliAvailable_ = cli_.initialize() == adapters::cli::CliInitializeResult::Initialized;
 	serialFilter_.setSinks(routeCliBytes, this, routeProvisioningBytes, this);
 	network_.initialize(nowMs);
+	char managementHost[96]{};
+	char managementOrigin[192]{};
+	std::snprintf(managementHost, sizeof(managementHost), "%s.local", configurationService_.active().network.hostName.data());
+	std::snprintf(managementOrigin, sizeof(managementOrigin), "https://%s", managementHost);
+	static_cast<void>(webSecurityStore_.initialize());
+	static_cast<void>(webSecurityService_.initialize(managementOrigin, managementHost));
+	webAvailable_ = webServer_.initialize() == adapters::web::WebServerInitializeResult::Initialized;
 	const auto knxResult = knx_.initialize(configurationService_.active().knx, nowMs);
 	const auto &modbusConfiguration = configurationService_.active().modbus;
 	const adapters::modbus::ModbusRtuConfiguration rtuConfiguration{
@@ -218,6 +232,11 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	lastCliPollAtMs_ = nowMs;
 	lastIndicatorUpdateAtMs_ = nowMs;
 	lastDiagnosticsUpdateAtMs_ = nowMs;
+	lastPublishedNetworkSequence_ = network_.statusPort().snapshot().sequence;
+	lastPublishedWifiScanSequence_ = network_.statusPort().snapshot().wifiScan.sequence;
+	lastPublishedConfigurationGeneration_ = configurationService_.active().generation;
+	diagnosticsEventSequence_ = 0;
+	restartPending_ = false;
 	initialized_ = true;
 	if (!configurationValid || !persistenceHealthy || !fileSystemReady || !modbusAvailable_ || !cliAvailable_ ||
 		knxResult == adapters::knx::KnxInitializeResult::Unavailable)
@@ -250,10 +269,11 @@ void Application::update(const std::uint32_t nowMs) noexcept
 		return;
 	}
 	static_cast<void>(relayTimerService_.update(nowMs));
+	processWebRequest(nowMs);
 	if (nowMs - lastRelayProcessAtMs_ >= relayProcessIntervalMs)
 	{
 		lastRelayProcessAtMs_ = nowMs;
-		processRelayCommand();
+		processRelayCommand(nowMs);
 	}
 	if (modbusAvailable_ && nowMs - lastModbusPollAtMs_ >= modbusPollIntervalMs)
 	{
@@ -298,6 +318,8 @@ void Application::update(const std::uint32_t nowMs) noexcept
 		static_cast<void>(cli_.poll());
 	}
 	network_.update(nowMs);
+	webCommandTracker_.expire(nowMs);
+	webRequestQueue_.expire(nowMs);
 	if (nowMs - lastIndicatorUpdateAtMs_ >= indicatorUpdateIntervalMs)
 	{
 		lastIndicatorUpdateAtMs_ = nowMs;
@@ -308,10 +330,21 @@ void Application::update(const std::uint32_t nowMs) noexcept
 		lastDiagnosticsUpdateAtMs_ = nowMs;
 		updateDiagnostics(nowMs);
 	}
+	publishWebStateEvents(nowMs);
+	webServer_.update(nowMs);
 	static_cast<void>(knx_.poll());
 	if (watchdog_.feed() != adapters::watchdog::WatchdogFeedResult::Fed)
 	{
 		handleWatchdogFailure(nowMs);
+	}
+	if (!restartPending_ && lifecycle_.state() == LifecycleState::Restarting)
+	{
+		restartRequestedAtMs_ = nowMs;
+		restartPending_ = true;
+	}
+	if (restartPending_ && nowMs - restartRequestedAtMs_ >= controlledRestartDrainMs)
+	{
+		ESP.restart();
 	}
 }
 
@@ -388,6 +421,13 @@ bool Application::performFactoryReset(const std::uint32_t nowMs) noexcept
 	}
 
 	commandQueue_.clear();
+	if (webSecurityService_.erase() != ports::WebSecurityStoreResult::Applied)
+	{
+		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::SettingsSaveFailure,
+			domain::FaultSeverity::Warning, nowMs));
+		statusIndicator_.notifyCommand(adapters::indicators::CommandFeedback::Rejected, nowMs);
+		return false;
+	}
 	if (configurationService_.factoryReset() != ConfigurationFactoryResetResult::Erased)
 	{
 		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::SettingsSaveFailure,
@@ -463,12 +503,33 @@ void Application::handleWatchdogFailure(const std::uint32_t nowMs) noexcept
 	initialized_ = false;
 }
 
-void Application::processRelayCommand() noexcept
+void Application::processRelayCommand(const std::uint32_t nowMs) noexcept
 {
-	RelayCommandBatchResult result{};
-	if (!commandQueue_.processNext(relayService_, result))
+	RelayCommandBatch batch{};
+	if (!commandQueue_.dequeue(batch))
 	{
 		return;
+	}
+	const auto result = relayService_.executeBatch(batch.commands.data(), batch.count);
+	for (std::size_t index = 0; index < batch.count; ++index)
+	{
+		const auto &command = batch.commands[index];
+		const auto *snapshot = relayService_.snapshot(command.channel);
+		WebTrackedCommand tracked{};
+		if (snapshot != nullptr)
+		{
+			static_cast<void>(webCommandTracker_.complete(command.correlationId, result.status, result.reason,
+				*snapshot, nowMs, tracked));
+		}
+		webEventJournal_.publish({0,
+			WebEventType::RelayCommandCompleted,
+			command.correlationId,
+			command.channel,
+			snapshot != nullptr ? snapshot->appliedState : domain::RelayState::Off,
+			result.status,
+			result.reason,
+			snapshot != nullptr ? snapshot->transitionSequence : 0,
+			nowMs});
 	}
 	if (result.status == RelayCommandStatus::Accepted)
 	{
@@ -481,6 +542,35 @@ void Application::processRelayCommand() noexcept
 void Application::updateDiagnostics(const std::uint32_t nowMs) noexcept
 {
 	diagnostics_.updateRuntime(nowMs, ESP.getMinFreeHeap(), watchdog_.isHealthy());
+	++diagnosticsEventSequence_;
+	webEventJournal_.publish({0, WebEventType::DiagnosticsChanged, 0, {0}, domain::RelayState::Off,
+		RelayCommandStatus::Accepted, RelayCommandReason::None, diagnosticsEventSequence_, nowMs});
+}
+
+void Application::publishWebStateEvents(const std::uint32_t nowMs) noexcept
+{
+	const auto &networkSnapshot = network_.statusPort().snapshot();
+	if (networkSnapshot.sequence != lastPublishedNetworkSequence_)
+	{
+		lastPublishedNetworkSequence_ = networkSnapshot.sequence;
+		webEventJournal_.publish({0, WebEventType::NetworkChanged, 0, {0}, domain::RelayState::Off,
+			RelayCommandStatus::Accepted, RelayCommandReason::None, networkSnapshot.sequence, nowMs});
+	}
+	if (networkSnapshot.wifiScan.sequence != lastPublishedWifiScanSequence_)
+	{
+		lastPublishedWifiScanSequence_ = networkSnapshot.wifiScan.sequence;
+		const auto eventType = networkSnapshot.wifiScan.state == ports::WifiScanState::Scanning ?
+			WebEventType::WifiScanStarted : WebEventType::WifiScanCompleted;
+		webEventJournal_.publish({0, eventType, 0, {0}, domain::RelayState::Off,
+			RelayCommandStatus::Accepted, RelayCommandReason::None, networkSnapshot.wifiScan.sequence, nowMs});
+	}
+	const auto generation = configurationService_.active().generation;
+	if (generation != lastPublishedConfigurationGeneration_)
+	{
+		lastPublishedConfigurationGeneration_ = generation;
+		webEventJournal_.publish({0, WebEventType::ConfigurationChanged, 0, {0}, domain::RelayState::Off,
+			RelayCommandStatus::Accepted, RelayCommandReason::None, generation, nowMs});
+	}
 }
 
 std::uint32_t Application::monotonicMilliseconds(void *) noexcept
@@ -493,5 +583,168 @@ bool Application::extendModbusSnapshot(void *, adapters::modbus::RegisterMapSnap
 	snapshot.softwareVersion = 100;
 	snapshot.uartEncodedSettingsAvailable = false;
 	return true;
+}
+
+void Application::processWebRequest(const std::uint32_t nowMs) noexcept
+{
+	WebApplicationRequest request{};
+	if (!webRequestQueue_.dequeue(request)) return;
+	WebOperationStatus status{WebOperationStatus::Unavailable};
+	const auto mapWifiResult = [](const WifiManagementResult result) {
+		switch (result)
+		{
+		case WifiManagementResult::Applied: return WebOperationStatus::Applied;
+		case WifiManagementResult::GenerationConflict: return WebOperationStatus::Conflict;
+		case WifiManagementResult::InvalidIndex:
+		case WifiManagementResult::InvalidConfiguration: return WebOperationStatus::Invalid;
+		default: return WebOperationStatus::Unavailable;
+		}
+	};
+	switch (request.type)
+	{
+	case WebRequestType::RelayCommand:
+	{
+		const auto result = switchingPolicy_.requestChannel(request.channel, request.action, domain::CommandSource::Web,
+			request.correlationId, request.receivedAtMs);
+		status = result == SwitchingPolicyResult::Accepted ? WebOperationStatus::Applied :
+			result == SwitchingPolicyResult::QueueFull ? WebOperationStatus::Unavailable : WebOperationStatus::Rejected;
+		if (result != SwitchingPolicyResult::Accepted)
+		{
+			WebTrackedCommand tracked{};
+			static_cast<void>(webCommandTracker_.reject(request.correlationId,
+				result == SwitchingPolicyResult::QueueFull ? RelayCommandReason::EventRejected : RelayCommandReason::InvalidAction,
+				nowMs, tracked));
+		}
+		break;
+	}
+	case WebRequestType::WifiScan:
+		status = network_.startWifiScan(nowMs) ? WebOperationStatus::Applied : WebOperationStatus::Conflict;
+		break;
+	case WebRequestType::WifiSaveProfile:
+		status = mapWifiResult(wifiManagementService_.saveProfile(request.wifiProfile));
+		if (status == WebOperationStatus::Applied) network_.applyCommittedConfiguration(nowMs);
+		break;
+	case WebRequestType::WifiRemoveProfile:
+		status = mapWifiResult(wifiManagementService_.removeProfile(request.index, request.expectedGeneration));
+		if (status == WebOperationStatus::Applied) network_.applyCommittedConfiguration(nowMs);
+		break;
+	case WebRequestType::WifiMoveProfile:
+		status = mapWifiResult(wifiManagementService_.moveProfile(request.index, request.toIndex,
+			request.expectedGeneration));
+		if (status == WebOperationStatus::Applied) network_.applyCommittedConfiguration(nowMs);
+		break;
+	case WebRequestType::WifiConnectProfile:
+		status = network_.connectWifiProfile(request.index, nowMs) ? WebOperationStatus::Applied :
+			WebOperationStatus::Conflict;
+		break;
+	case WebRequestType::WifiSaveRecoveryAp:
+		status = mapWifiResult(wifiManagementService_.updateRecoveryAp(request.recoveryAp,
+			request.expectedGeneration));
+		if (status == WebOperationStatus::Applied) network_.applyCommittedConfiguration(nowMs);
+		break;
+	case WebRequestType::SaveModbusConfiguration:
+	{
+		if (request.expectedGeneration != configurationService_.active().generation)
+		{
+			status = WebOperationStatus::Conflict;
+			break;
+		}
+		auto replacement = configurationService_.active();
+		replacement.modbus = request.modbusConfiguration;
+		if (configurationService_.stage(replacement) != ConfigurationStageResult::Staged)
+		{
+			status = WebOperationStatus::Invalid;
+			break;
+		}
+		const auto commit = configurationService_.commit();
+		diagnostics_.updateConfiguration(configurationService_.hasValidActiveConfiguration(),
+			configurationService_.active().generation, configurationService_.lastLoadResult(),
+			configurationService_.lastSaveResult());
+		if (commit == ConfigurationCommitResult::PersistenceFailure)
+		{
+			static_cast<void>(diagnostics_.recordFault(domain::FaultCode::SettingsSaveFailure,
+				domain::FaultSeverity::Warning, nowMs));
+			status = WebOperationStatus::Unavailable;
+			break;
+		}
+		if (commit != ConfigurationCommitResult::Committed && commit != ConfigurationCommitResult::CommittedRestartRequired)
+		{
+			status = WebOperationStatus::Unavailable;
+			break;
+		}
+		static_cast<void>(diagnostics_.clearFault(domain::FaultCode::SettingsSaveFailure));
+		status = WebOperationStatus::Applied;
+		if (commit == ConfigurationCommitResult::CommittedRestartRequired &&
+			lifecycle_.requestRestart(nowMs) != LifecycleResult::Applied) status = WebOperationStatus::Unavailable;
+		break;
+	}
+	case WebRequestType::SetModbusRole:
+	{
+		const auto control = modbusRtu_.controlPort();
+		status = control.isValid() && control.setRole(control.context, request.modbusRole) ?
+			WebOperationStatus::Applied : WebOperationStatus::Unavailable;
+		break;
+	}
+	case WebRequestType::SaveKnxConfiguration:
+	{
+		if (request.expectedGeneration != configurationService_.active().generation)
+		{
+			status = WebOperationStatus::Conflict;
+			break;
+		}
+		auto replacement = configurationService_.active();
+		replacement.knx = request.knxConfiguration;
+		if (configurationService_.stage(replacement) != ConfigurationStageResult::Staged)
+		{
+			status = WebOperationStatus::Invalid;
+			break;
+		}
+		const auto commit = configurationService_.commit();
+		diagnostics_.updateConfiguration(configurationService_.hasValidActiveConfiguration(),
+			configurationService_.active().generation, configurationService_.lastLoadResult(),
+			configurationService_.lastSaveResult());
+		if (commit == ConfigurationCommitResult::PersistenceFailure)
+		{
+			static_cast<void>(diagnostics_.recordFault(domain::FaultCode::SettingsSaveFailure,
+				domain::FaultSeverity::Warning, nowMs));
+			status = WebOperationStatus::Unavailable;
+			break;
+		}
+		if (commit != ConfigurationCommitResult::Committed && commit != ConfigurationCommitResult::CommittedRestartRequired)
+		{
+			status = WebOperationStatus::Unavailable;
+			break;
+		}
+		static_cast<void>(diagnostics_.clearFault(domain::FaultCode::SettingsSaveFailure));
+		status = WebOperationStatus::Applied;
+		if (commit == ConfigurationCommitResult::CommittedRestartRequired &&
+			lifecycle_.requestRestart(nowMs) != LifecycleResult::Applied) status = WebOperationStatus::Unavailable;
+		break;
+	}
+	case WebRequestType::SaveUser:
+	{
+		const auto result = webSecurityService_.saveUser(request.userId,
+			std::string_view{request.username.data(), strnlen(request.username.data(), request.username.size())},
+			request.userRole, request.userEnabled,
+			std::string_view{request.password.data(), strnlen(request.password.data(), request.password.size())},
+			request.replacePassword);
+		status = result == WebUserManagementResult::Applied ? WebOperationStatus::Applied :
+			(result == WebUserManagementResult::Invalid || result == WebUserManagementResult::DuplicateUsername ||
+			 result == WebUserManagementResult::LastAdministrator) ? WebOperationStatus::Invalid :
+			WebOperationStatus::Unavailable;
+		std::fill(request.password.begin(), request.password.end(), '\0');
+		break;
+	}
+	case WebRequestType::Restart:
+		if (lifecycle_.requestRestart(nowMs) == LifecycleResult::Applied)
+		{
+			restartRequestedAtMs_ = nowMs;
+			restartPending_ = true;
+			status = WebOperationStatus::Applied;
+		}
+		else status = WebOperationStatus::Unavailable;
+		break;
+	}
+	static_cast<void>(webRequestQueue_.complete(request.operationId, status, nowMs));
 }
 }

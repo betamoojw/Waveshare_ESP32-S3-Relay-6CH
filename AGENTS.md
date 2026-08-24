@@ -40,6 +40,11 @@ Project-specific guidance for AI Coding Agent & AI Code Review Reference in this
 
 Readability, maintainability, lower coupling, duplication removal, long-function extraction, SRP（Single Responsibility Principle）, modern C++17 style, naming, const correctness, RAII, reduced raw `new`/`delete`, unused parameter cleanup, and return-type review, create new type accessor if neccessory, boundary check and safe.
 
+## Hard Boundaries
+
+Quick summary of the most costly mistakes to avoid — each is spelled out in full in the referenced section or file. If any conflicts with a detailed section, the detailed section wins.
+
+- **Don't build after making changes unless explicitly asked** — the user reviews and builds themselves by default.
 
 ## Switch Actuator
 

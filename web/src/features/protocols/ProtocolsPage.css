@@ -1,0 +1,352 @@
+.protocol-configuration {
+  margin-top: 32px;
+  padding-top: 26px;
+  border-top: 1px solid var(--border);
+}
+
+.protocol-configuration .section-heading h2 {
+  margin: 0 0 5px;
+  font-size: 18px;
+}
+
+.protocol-configuration .section-heading p {
+  max-width: 640px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.generation-label {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.protocol-loading {
+  min-height: 160px;
+}
+
+.modbus-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 20px;
+  max-width: 760px;
+  margin-top: 22px;
+}
+
+.modbus-form > label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.modbus-form input,
+.modbus-form select {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 11px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.modbus-form input:focus,
+.modbus-form select:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.modbus-form input:disabled,
+.modbus-form select:disabled {
+  color: var(--muted);
+  background: var(--surface-muted);
+  cursor: not-allowed;
+}
+
+.modbus-form small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.role-control {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 0 18px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.role-control legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(90px, 1fr));
+  width: min(100%, 280px);
+  padding: 3px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.segmented-control button {
+  min-height: 36px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.segmented-control button[aria-pressed='true'] {
+  color: var(--ink);
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(24 35 34 / 14%);
+}
+
+.segmented-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.serial-summary {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: max-content max-content max-content max-content;
+  align-items: baseline;
+  gap: 8px 18px;
+  padding: 13px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.serial-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.serial-summary strong {
+  font-size: 14px;
+}
+
+.modbus-form .notice-band {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+.knx-form {
+  display: grid;
+  gap: 22px;
+  max-width: 980px;
+  margin-top: 22px;
+}
+
+.knx-enable-row {
+  padding: 15px 16px;
+  background: var(--surface-muted);
+  border-left: 3px solid var(--accent);
+}
+
+.check-control {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--ink);
+}
+
+.check-control input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.check-control > span {
+  display: grid;
+  gap: 3px;
+}
+
+.check-control small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.check-control.compact {
+  align-items: center;
+  font-size: 12px;
+}
+
+.check-control.compact input {
+  margin-top: 0;
+}
+
+.knx-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 18px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.knx-fieldset legend {
+  padding: 0 12px 0 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.knx-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 18px;
+}
+
+.knx-grid > label {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.knx-grid input:not([type='checkbox']) {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 11px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.knx-grid input:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.knx-grid input:disabled {
+  color: var(--muted);
+  background: var(--surface-muted);
+  cursor: not-allowed;
+}
+
+.knx-grid small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.unit-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: center;
+}
+
+.unit-input input {
+  border-radius: 4px 0 0 4px !important;
+}
+
+.unit-input > span {
+  display: grid;
+  place-items: center;
+  min-height: 42px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--border-strong);
+  border-left: 0;
+  border-radius: 0 4px 4px 0;
+  font-weight: 600;
+}
+
+.object-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.knx-channel-list {
+  display: grid;
+  border-top: 1px solid var(--border);
+}
+
+.knx-channel-list details {
+  border-bottom: 1px solid var(--border);
+}
+
+.knx-channel-list summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 20px;
+  padding: 14px 4px;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.knx-channel-list summary span:last-child {
+  color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.knx-channel-content {
+  display: grid;
+  gap: 17px;
+  padding: 2px 4px 18px;
+}
+
+.channel-addresses {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.channel-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+
+.knx-form > .notice-band {
+  margin-top: 0;
+}
+
+@media (max-width: 720px) {
+  .modbus-form {
+    grid-template-columns: 1fr;
+  }
+
+  .serial-summary,
+  .role-control,
+  .modbus-form .form-actions,
+  .modbus-form .notice-band {
+    grid-column: 1;
+  }
+
+  .serial-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .knx-grid,
+  .object-grid,
+  .channel-addresses,
+  .channel-options {
+    grid-template-columns: 1fr;
+  }
+
+  .knx-channel-list summary {
+    gap: 10px;
+  }
+}

@@ -75,6 +75,7 @@
     },
     "chat.tools.terminal.autoApprove": {
         "npm install": true,
-        "npm run build": true
+        "npm run build": true,
+        "npm --prefix \"C:\\BetaMoojw\\Waveshare_ESP32-S3-Relay-6CH\\web\"": true
     }
 }
