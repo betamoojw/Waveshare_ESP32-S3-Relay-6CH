@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../bsp/board_descriptor.h"
+#include "../../hal/ButtonHal.h"
 
 #include <cstdint>
 
@@ -26,7 +26,9 @@ using ButtonEventHandler = bool (*)(const ButtonEvent &event, void *context) noe
 enum class ButtonInitializeResult : std::uint8_t
 {
 	Initialized,
-	InvalidHandler
+	InvalidHandler,
+	InvalidHal,
+	HardwareFailure
 };
 
 enum class ButtonUpdateResult : std::uint8_t
@@ -40,7 +42,7 @@ enum class ButtonUpdateResult : std::uint8_t
 class ButtonAdapter final
 {
 public:
-	ButtonAdapter(const bsp::BoardDescriptor &descriptor, ButtonEventHandler eventHandler, void *eventContext = nullptr) noexcept;
+	ButtonAdapter(hal::ButtonHal buttonHal, ButtonEventHandler eventHandler, void *eventContext = nullptr) noexcept;
 
 	[[nodiscard]] ButtonInitializeResult initialize(std::uint32_t nowMs) noexcept;
 	[[nodiscard]] ButtonUpdateResult update(std::uint32_t nowMs) noexcept;
@@ -57,7 +59,7 @@ private:
 	static constexpr std::uint32_t commissioningHoldDurationMs{3000};
 	static constexpr std::uint32_t factoryResetHoldDurationMs{10000};
 
-	const bsp::BoardDescriptor &descriptor_;
+	hal::ButtonHal buttonHal_;
 	ButtonEventHandler eventHandler_;
 	void *eventContext_;
 	std::uint32_t initializedAtMs_{0};

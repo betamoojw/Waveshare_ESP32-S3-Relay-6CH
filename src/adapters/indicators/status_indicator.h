@@ -1,6 +1,7 @@
 #pragma once
 
-#include "../bsp/board_descriptor.h"
+#include "../../hal/BuzzerHal.h"
+#include "../../hal/RgbLedHal.h"
 
 #include <cstdint>
 
@@ -44,7 +45,7 @@ struct MaintenanceIndicatorState final
 class StatusIndicator final
 {
 public:
-	explicit StatusIndicator(const bsp::BoardDescriptor &descriptor) noexcept;
+	StatusIndicator(hal::RgbLedHal rgbLedHal, hal::BuzzerHal buzzerHal) noexcept;
 	~StatusIndicator();
 
 	StatusIndicator(const StatusIndicator &) = delete;
@@ -100,7 +101,8 @@ private:
 	static constexpr std::uint32_t maintenanceDurationMs{5000};
 	static constexpr std::uint32_t maintenanceToneDurationMs{100};
 
-	const bsp::BoardDescriptor &descriptor_;
+	hal::RgbLedHal rgbLedHal_;
+	hal::BuzzerHal buzzerHal_;
 	OutputState appliedOutput_{};
 	CommandFeedback commandFeedback_{CommandFeedback::Accepted};
 	std::uint32_t commandFeedbackStartedAtMs_{0};

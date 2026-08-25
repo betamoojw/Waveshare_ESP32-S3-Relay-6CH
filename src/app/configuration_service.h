@@ -34,6 +34,14 @@ enum class ConfigurationCommitResult : std::uint8_t
 enum class ConfigurationFactoryResetResult : std::uint8_t
 {
 	Erased,
+	InvalidIdentity,
+	PersistenceFailure
+};
+
+enum class ConfigurationUserResetResult : std::uint8_t
+{
+	Erased,
+	InvalidIdentity,
 	PersistenceFailure
 };
 
@@ -47,6 +55,7 @@ public:
 	[[nodiscard]] ConfigurationStageResult stage(const domain::Configuration &configuration) noexcept;
 	[[nodiscard]] ConfigurationCommitResult commit() noexcept;
 	[[nodiscard]] ConfigurationFactoryResetResult factoryReset() noexcept;
+	[[nodiscard]] ConfigurationUserResetResult eraseUserConfiguration() noexcept;
 	void discardStaged() noexcept;
 
 	[[nodiscard]] const domain::Configuration &active() const noexcept;

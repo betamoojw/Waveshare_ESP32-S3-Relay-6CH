@@ -3,6 +3,7 @@ import type { Capabilities, CommandResult, Device, Diagnostics, KnxConfiguration
 export const mockCapabilities: Capabilities = {
   apiVersion: '1.0',
   minimumUiVersion: '1.0.0',
+  versions: { hardware: 'HW-A01', firmware: 'FW-1.4.0+preview', configuration: 'CFG-4', api: 'API-v1', modbus: 'MODBUS-v1', knxApplication: 'KNX-APP-v1', filesystem: 'FS-v1' },
   deviceId: '00000000-0000-0000-0000-000000000001',
   bootId: 'preview-4f8219ac',
   model: 'Waveshare ESP32-S3 Relay 6CH',
@@ -25,8 +26,8 @@ export const mockDevice: Device = {
   name: 'Plant room actuator',
   model: mockCapabilities.model,
   serialSuffix: '0001',
-  firmwareVersion: '1.00',
-  buildId: 'ws_esp32-s3-relay-6ch',
+  firmwareVersion: 'FW-1.4.0+preview',
+  buildId: 'development',
   uptimeMs: 16_620_000,
   lifecycle: 'operational',
   lifecycleReason: 'Configuration valid',
@@ -35,6 +36,7 @@ export const mockDevice: Device = {
 
 export const mockNetwork: NetworkStatus = {
   state: 'online',
+  activeTransport: 'wifi',
   ipv4Address: '192.168.10.42',
   rssi: -58,
   activeProfileIndex: 0,
@@ -59,6 +61,33 @@ const relays: RelayList['relays'] = Array.from({ length: 6 }, (_, id) => ({
 }))
 
 export const mockDiagnostics: Diagnostics = {
+  device: { uptimeMs: 913_240, bootCount: 18, resetReason: 'power-on', lifecycle: 'degraded' },
+  persistentCounters: {
+    bootCount: 18,
+    watchdogCount: 1,
+    brownoutCount: 2,
+    configErrorCount: 1,
+    otaFailureCount: 0,
+    networkFailureCount: 4,
+    modbusErrorCount: 3,
+    knxErrorCount: 2,
+    storageErrorCount: 0,
+  },
+  firmware: { version: '1.0.0', buildId: 'preview' },
+  hardware: { model: 'Waveshare ESP32-S3 Relay 6CH', revision: '1.0' },
+  memory: {
+    freeHeapBytes: 219_840,
+    minimumFreeHeapBytes: 182_416,
+    largestFreeHeapBlockBytes: 131_072,
+    psram: { available: true, totalBytes: 8_388_608, freeBytes: 8_192_000, minimumFreeBytes: 8_126_464 },
+  },
+  cpu: { frequencyMhz: 240, coreCount: 2 },
+  network: { state: 'online', connected: true, recoveryApActive: false, wifiRssiDbm: -54, ipv4Address: '192.168.1.42' },
+  storage: { filesystemAvailable: true, settingsAvailable: true, settingsHealthy: true, configurationValid: true, configurationGeneration: 12 },
+  faultState: { active: true, activeCount: 1 },
+  relays: relays.map(({ id, requestedState, appliedState, lockedOut, fault, transitionSequence }) => ({
+    id, requestedState, appliedState, lockedOut, faulted: fault !== null, transitionSequence,
+  })),
   configurationValid: true,
   persistenceHealthy: true,
   taskWatchdogHealthy: true,
@@ -127,7 +156,7 @@ export const mockUsers: User[] = [
 ]
 
 export const mockOtaStatus: OtaStatus = {
-  state: 'idle', progressPercent: 0, currentVersion: '1.00', buildEnvironment: 'ws_esp32-s3-relay-6ch', availableVersion: null, error: null,
+  state: 'idle', progressPercent: 0, currentVersion: '1.00', buildEnvironment: 'development', availableVersion: null, error: null,
 }
 
 export const mockModbusConfiguration: ModbusConfiguration = {

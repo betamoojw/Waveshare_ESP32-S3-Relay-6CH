@@ -6,7 +6,16 @@
 
 namespace switch_actuator::ports
 {
-enum class NetworkLifecycleState : std::uint8_t { Disabled, ConnectingWifi, OnlineWifi, RecoveryAp };
+enum class NetworkLifecycleState : std::uint8_t
+{
+	Disabled,
+	ConnectingWifi,
+	OnlineWifi,
+	RecoveryAp,
+	ConnectingEthernet,
+	OnlineEthernet
+};
+enum class NetworkTransport : std::uint8_t { None, Wifi, Ethernet };
 enum class WifiScanState : std::uint8_t { Idle, Scanning, Complete, Failed };
 
 inline constexpr std::size_t maximumWifiScanResults{16};
@@ -36,6 +45,9 @@ struct NetworkStatusSnapshot final
 	std::uint32_t lastStateChangeAtMs{0};
 	std::uint32_t lastConnectedAtMs{0};
 	std::uint8_t activeProfileIndex{0xFF};
+	NetworkTransport activeTransport{NetworkTransport::None};
+	bool wifiAvailable{false};
+	bool ethernetAvailable{false};
 	bool infrastructureOnline{false};
 	bool recoveryApActive{false};
 	std::int32_t rssi{0};

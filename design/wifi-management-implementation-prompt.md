@@ -4,7 +4,7 @@ Use this prompt when implementing or reviewing the remaining production Wi-Fi ma
 
 ---
 
-You are a senior embedded, security, API, and frontend engineer working in the `Waveshare_ESP32-S3-Relay-6CH` repository. Implement production-grade Wi-Fi management for the ESP32-S3 relay actuator. Follow `AGENTS.md`, `design/software-architecture-instructions.md`, `design/network-architecture.md`, `design/fontend-plan.md`, and `design/fontend-instructions.md`. Use C++17 only.
+You are a senior embedded, security, API, and frontend engineer working in the `Waveshare_ESP32-S3-Relay-6CH` repository. Implement production-grade Wi-Fi management for the ESP32-S3 relay actuator. Follow `AGENTS.md`, `docs/architecture/system.md`, `docs/architecture/network.md`, `design/fontend-plan.md`, and `design/fontend-instructions.md`. Use C++17 only.
 
 ## Objective
 
@@ -85,8 +85,8 @@ Run and report:
 
 ```text
 platformio test -e native
-platformio run -e ws_esp32-s3-relay-6ch
-platformio run -e ws_esp32-s3-relay-6ch -t buildfs
+platformio run -e development
+platformio run -e development -t buildfs
 cd web && npm run lint && npm test && npm run build
 ```
 

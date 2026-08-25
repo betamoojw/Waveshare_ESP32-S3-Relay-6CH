@@ -1,4 +1,4 @@
-# Switch Actuator Filesystem Architecture
+# Filesystem Architecture
 
 ## Purpose
 
@@ -73,10 +73,13 @@ bundle is valid, firmware uses the embedded fallback. A normal firmware flash
 does not overwrite LittleFS, and the adapter never manufactures a partial split
 bundle from the embedded monolithic fallback.
 
-Factory reset erases mutable NVS settings. It does not erase LittleFS deployment
-defaults; the next boot therefore returns to the deployed file default. A
-separate authenticated maintenance operation is required before filesystem
-formatting can be introduced.
+Factory reset transactionally replaces mutable user configuration in NVS with
+validated safe defaults while preserving manufacturing identity and diagnostic
+counters. It does not erase LittleFS deployment defaults. Because the reset
+configuration remains the newest valid NVS generation, LittleFS does not
+override it on the next boot. The complete remove/preserve contract is defined
+in [Factory reset](../manufacturing/factory-reset.md). A separate authenticated maintenance
+operation is required before filesystem formatting can be introduced.
 
 ## Web and Security Boundary
 
@@ -107,8 +110,8 @@ PlatformIO selects `littlefs` through `board_build.filesystem` and builds the
 image from `data/`. Build and upload the data-driven bundle with:
 
 ```text
-pio run -e ws_esp32-s3-relay-6ch -t buildfs
-pio run -e ws_esp32-s3-relay-6ch -t uploadfs
+pio run -e development -t buildfs
+pio run -e development -t uploadfs
 ```
 
 An ordinary firmware flash remains bootable through the embedded monolithic

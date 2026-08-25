@@ -164,12 +164,15 @@ ports::ConfigurationFileStoreResult LittleFsConfigurationSource::store(
 	JsonDocument system;
 	system["schemaVersion"] = domain::currentConfigurationSchemaVersion;
 	auto identity = system["identity"].to<JsonObject>();
+	identity["productId"] = configuration.productId.value.data();
 	identity["boardModel"] = configuration.boardModel.data();
 	identity["hardwareRevision"] = configuration.hardwareRevision.data();
 	identity["deviceSerial"] = configuration.deviceSerial.data();
 	std::array<char, 37> uuid{};
 	formatUuid(configuration.deviceUuid, uuid);
 	identity["deviceUuid"] = uuid.data();
+	identity["manufacturingDate"] = configuration.manufacturingDate.iso8601.data();
+	identity["manufacturingBatch"] = configuration.manufacturingBatch;
 	auto relays = system["relayChannels"].to<JsonArray>();
 	for (const auto &relay : configuration.relayChannels)
 	{

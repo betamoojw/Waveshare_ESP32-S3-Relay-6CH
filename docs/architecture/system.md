@@ -1,4 +1,4 @@
-# Switch Actuator Software/Firmware Architecture
+# System Architecture
 
 ## 1. Purpose and Status
 
@@ -37,6 +37,11 @@ The order of priorities is:
 The firmware MUST use C++17. The build configuration MUST select `-std=gnu++17` or `-std=c++17` consistently and MUST NOT enable C++20. C modules such as NanoModbus MAY remain C11-compatible and MUST be wrapped by a typed C++ adapter before use by application code.
 
 Dynamic allocation after startup SHOULD be avoided. Timing-critical and frequently executed paths MUST use fixed-capacity storage. Exceptions, RTTI, and virtual dispatch MUST NOT be introduced unless their memory, timing, and failure behavior are measured and justified in an ADR.
+
+Concrete ownership, capacities, task stacks, synchronization boundaries,
+shutdown order, heap thresholds, and PSRAM policy are normative in
+[Resource management](../../design/resource-management.md). A component MUST NOT start,
+stop, resize, or delete a resource owned by another component.
 
 ## 4. System Context
 
@@ -87,6 +92,11 @@ flowchart TB
 				EVENTS[Commands, events, faults]
 		end
 
+		subgraph HAL[Hardware abstraction]
+				BOARD[Board descriptor]
+				HW[Relay / Button / RGB / Buzzer / RS-485 / Network HAL]
+		end
+
 		subgraph Outbound[Outbound ports and adapters]
 				RH[RelayOutputPort / GPIO adapter]
 				STORE[SettingsStore / NVS adapter]
@@ -103,7 +113,8 @@ flowchart TB
 		QUEUE --> RC
 		SP --> ARB
 		Application --> Domain
-		Application --> Outbound
+		Application --> HAL
+		HAL --> Outbound
 ```
 
 ### 5.1 Dependency Rules
@@ -115,6 +126,15 @@ flowchart TB
 - Protocol adapters MAY query snapshots but MUST NOT own authoritative relay state.
 - The composition root is the only code that constructs concrete adapters and connects dependencies.
 - Cross-layer access through global mutable state or singleton lookup is prohibited.
+- Application-specific result enums MUST be translated to `domain::ErrorCode`
+	before crossing a protocol boundary. Protocol adapters MUST exhaustively map
+	the domain code to HTTP, Modbus, KNX, or other native representations and
+	MUST NOT invent independent string error taxonomies.
+- Hardware contracts and board selection live in `src/hal`. Application and
+	domain services MUST NOT include a product-specific board header or use GPIO,
+	LEDC, UART, Wi-Fi, or Arduino APIs directly.
+- Concrete BSP adapters implement HAL contracts. Product selection is confined
+	to `hal::board()` in the composition layer.
 
 ## 6. Domain Model
 
@@ -142,6 +162,35 @@ struct RelayCommand final {
 ```
 
 Actual names may follow repository conventions, but the concepts and type safety are mandatory. Bare integers MUST NOT cross the adapter/application boundary as channel identifiers, actions, or command sources.
+
+### 6.1.1 Error Contract
+
+`domain::ErrorCode` is the protocol-neutral failure vocabulary:
+
+```cpp
+enum class ErrorCode {
+	InvalidArgument,
+	Unauthorized,
+	Forbidden,
+	NotFound,
+	Busy,
+	StorageError,
+	ConfigurationError,
+	HardwareError,
+	NetworkError,
+	ProtocolError,
+	Unsupported,
+	InternalError
+};
+```
+
+The required flow is `application result -> domain::ErrorCode -> protocol
+representation`. A successful operation is represented separately, currently
+as an empty `std::optional<ErrorCode>`, and MUST NOT be encoded as an error.
+Mappings belong in `app/error_mapping.h` and each protocol adapter's
+`*_error_representation.h`. Lossy mappings, such as several domain errors
+collapsing to Modbus server device failure or KNX silent rejection, MUST be
+explicit and covered by tests.
 
 ### 6.2 Authoritative State
 
@@ -175,7 +224,14 @@ Among non-safety sources, the default policy is deterministic last-accepted-comm
 
 Every accepted or rejected command MUST produce a result containing the correlation ID, final state, and reason code. Protocol adapters translate reason codes into protocol-native responses.
 
-### 6.5 Application Switching Services
+### 6.5 Relay Startup And Disturbance Safety
+
+Relay behavior during power-on, brownout, watchdog reset, software reboot, OTA
+reboot, factory reset, configuration update, and network failure is defined by
+[Relay safety policy](../../design/relay-safety-policy.md). That decision table is normative. Unknown reset
+causes and unavailable state always fail safe to OFF.
+
+### 6.6 Application Switching Services
 
 Advanced switching behavior MUST be divided among three protocol-neutral application services. These services MUST use domain types and abstract ports only; they MUST NOT include Arduino, KNX, Modbus, HTTP, GPIO, NVS, or vendor-library types.
 
@@ -317,7 +373,7 @@ Configuration changes follow `validate -> stage -> persist -> apply`. Changes th
 
 The repository-level `data/config/` directory is the data-driven deployment source and MUST contain `system.json`, `network.json`, `wifi.json`, `ethernet.json`, `knx.json`, `modbus.json`, and `ui.json`. PlatformIO packages these paths into LittleFS. The repository-level `config/default_configuration.json` MUST remain embedded as an immutable recovery fallback so normal firmware flashing does not depend on a separately uploaded filesystem image. The filesystem adapter MUST reject a missing section, malformed JSON, incorrectly typed required fields, wrong fixed-array lengths, unsupported Ethernet enablement, out-of-range text, invalid UUID syntax, oversized section, and any value rejected by domain validation. Assembly and parsing MUST be failure-atomic: active configuration changes only after the complete seven-file bundle is accepted.
 
-Configuration precedence is `valid NVS generation -> valid LittleFS /config bundle -> valid LittleFS backup bundle -> valid embedded JSON -> safe domain defaults`. An empty NVS store on first boot is normal when JSON is valid. Corrupt or inaccessible NVS MUST still raise a persistence fault and degraded lifecycle state even when JSON fallback permits operation. LittleFS mount failure MUST NOT auto-format storage; it raises a filesystem fault and uses the embedded fallback. Factory reset erases NVS, locks relays off, and restarts; it preserves deployment defaults in LittleFS. Production bundles MUST replace development placeholder identity values with deployment-specific provisioning data and MUST NOT store secrets in filesystem configuration. Detailed ownership, recovery, and web-serving rules are defined in `design/filesystem-architecture.md`.
+Configuration precedence is `valid NVS generation -> valid LittleFS /config bundle -> valid LittleFS backup bundle -> valid embedded JSON -> safe domain defaults`. An empty NVS store on first boot is normal when JSON is valid. Corrupt or inaccessible NVS MUST still raise a persistence fault and degraded lifecycle state even when JSON fallback permits operation. LittleFS mount failure MUST NOT auto-format storage; it raises a filesystem fault and uses the embedded fallback. Factory reset locks relays off, transactionally persists safe user defaults, preserves manufacturing and factory security identity, and restarts. Production bundles MUST replace development placeholder identity values with deployment-specific provisioning data and MUST NOT store secrets in filesystem configuration. Detailed reset semantics are defined in [Factory reset](../manufacturing/factory-reset.md); ownership, recovery, and web-serving rules are defined in [Filesystem architecture](filesystem.md).
 
 Relay state persistence MUST be wear-aware. Coalesce changes, rate-limit writes, and store a compact bitmask plus generation and CRC. Safety-critical installations SHOULD use `AllOff` restore policy instead of frequent last-state persistence.
 
@@ -345,6 +401,10 @@ Unsupported functions MUST return `Illegal Function`. Out-of-range addresses MUS
 The Modbus data model is a projection of domain/configuration snapshots, not mutable application memory. Write callbacks MUST parse and validate a complete request, enqueue typed commands, and return a protocol result. They MUST NOT expose raw register-array pointers or allow application code to poll writable memory for changes.
 
 ### 11.3 Production Register Map
+
+The normative product contract is [Modbus RTU](../protocols/modbus.md).
+The table below is an architectural summary; if it differs from the product
+contract, the versioned product contract governs externally observable behavior.
 
 All addresses below are zero-based Protocol Data Unit addresses. Product manuals MAY additionally show one-based `4xxxx` notation but MUST label it clearly.
 

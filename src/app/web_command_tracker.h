@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <string_view>
 
 namespace switch_actuator::app
@@ -79,7 +80,9 @@ private:
 	[[nodiscard]] static std::uint32_t requestHash(domain::RelayChannelId channel,
 		domain::RelayAction action,
 		std::uint32_t expectedResourceSequence) noexcept;
+	void expireUnlocked(std::uint32_t nowMs) noexcept;
 
+	mutable std::mutex mutex_{};
 	std::array<WebTrackedCommand, capacity> commands_{};
 };
 }

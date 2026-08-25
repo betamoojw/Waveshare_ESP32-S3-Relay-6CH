@@ -1,5 +1,7 @@
 #include "modbus_application_gateway.h"
 
+#include "../../app/error_mapping.h"
+
 #include <limits>
 
 namespace switch_actuator::adapters::modbus
@@ -29,7 +31,7 @@ WriteBatchResult ModbusApplicationGateway::handleWriteBatch(void *const context,
 {
 	if (context == nullptr)
 	{
-		return WriteBatchResult::Failure;
+		return domain::ErrorCode::InternalError;
 	}
 	return static_cast<ModbusApplicationGateway *>(context)->submit(batch);
 }
@@ -60,21 +62,21 @@ WriteBatchResult ModbusApplicationGateway::submit(const HoldingWriteBatch &batch
 {
 	if (!isValid())
 	{
-		return WriteBatchResult::Failure;
+		return domain::ErrorCode::InternalError;
 	}
 	if (batch.kind != HoldingWriteKind::RelayCommands)
 	{
 		return dependencies_.nonRelayWriteHandler != nullptr
 				   ? dependencies_.nonRelayWriteHandler(dependencies_.nonRelayWriteContext, batch)
-				   : WriteBatchResult::IllegalValue;
+				   : WriteBatchResult{domain::ErrorCode::Unsupported};
 	}
 	if (!dependencies_.lifecycleSupervisor->acceptsOrdinaryCommands())
 	{
-		return WriteBatchResult::Failure;
+		return domain::ErrorCode::Forbidden;
 	}
 	if (batch.relayCommandCount == 0 || batch.relayCommandCount > batch.relayCommands.size())
 	{
-		return WriteBatchResult::IllegalValue;
+		return domain::ErrorCode::InvalidArgument;
 	}
 
 	app::RelayCommandBatch commandBatch{};
@@ -84,20 +86,7 @@ WriteBatchResult ModbusApplicationGateway::submit(const HoldingWriteBatch &batch
 		commandBatch.commands[index] = batch.relayCommands[index];
 	}
 
-	switch (dependencies_.switchingPolicy->requestBatch(commandBatch))
-	{
-	case app::SwitchingPolicyResult::Accepted:
-		return WriteBatchResult::Accepted;
-	case app::SwitchingPolicyResult::QueueFull:
-		return WriteBatchResult::QueueFull;
-	case app::SwitchingPolicyResult::NoParticipants:
-	case app::SwitchingPolicyResult::InvalidChannel:
-	case app::SwitchingPolicyResult::InvalidAction:
-	case app::SwitchingPolicyResult::InvalidSource:
-	case app::SwitchingPolicyResult::SafetyLockout:
-	default:
-		return WriteBatchResult::IllegalValue;
-	}
+	return app::errorCode(dependencies_.switchingPolicy->requestBatch(commandBatch));
 }
 
 std::uint16_t ModbusApplicationGateway::saturateToRegister(const std::uint32_t value) noexcept

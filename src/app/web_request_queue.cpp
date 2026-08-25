@@ -6,6 +6,7 @@ namespace switch_actuator::app
 {
 bool WebRequestQueue::enqueue(const WebApplicationRequest &request) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	if (request.operationId == 0 || request.sessionId == 0 || size_ >= capacity ||
 		std::any_of(results_.begin(), results_.end(), [&request](const auto &result) {
 			return result.active && result.operationId == request.operationId;
@@ -24,6 +25,7 @@ bool WebRequestQueue::enqueue(const WebApplicationRequest &request) noexcept
 
 bool WebRequestQueue::dequeue(WebApplicationRequest &request) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	if (size_ == 0) return false;
 	request = requests_[head_];
 	requests_[head_] = {};
@@ -36,6 +38,7 @@ bool WebRequestQueue::complete(const std::uint32_t operationId,
 	const WebOperationStatus status,
 	const std::uint32_t nowMs) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	const auto result = std::find_if(results_.begin(), results_.end(), [operationId](const auto &candidate) {
 		return candidate.active && candidate.operationId == operationId;
 	});
@@ -49,6 +52,7 @@ bool WebRequestQueue::findResult(const std::uint32_t sessionId,
 	const std::uint32_t operationId,
 	WebOperationResult &result) const noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	const auto match = std::find_if(results_.begin(), results_.end(), [sessionId, operationId](const auto &candidate) {
 		return candidate.active && candidate.sessionId == sessionId && candidate.operationId == operationId;
 	});
@@ -59,6 +63,7 @@ bool WebRequestQueue::findResult(const std::uint32_t sessionId,
 
 void WebRequestQueue::expire(const std::uint32_t nowMs) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	for (auto &result : results_)
 	{
 		if (result.active && result.completedAtMs != 0 && nowMs - result.completedAtMs >= resultRetentionMs) result = {};
@@ -67,6 +72,7 @@ void WebRequestQueue::expire(const std::uint32_t nowMs) noexcept
 
 void WebRequestQueue::clear() noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	requests_.fill({});
 	results_.fill({});
 	head_ = 0;
@@ -75,6 +81,15 @@ void WebRequestQueue::clear() noexcept
 	highWaterMark_ = 0;
 }
 
-std::size_t WebRequestQueue::size() const noexcept { return size_; }
-std::size_t WebRequestQueue::highWaterMark() const noexcept { return highWaterMark_; }
+std::size_t WebRequestQueue::size() const noexcept
+{
+	const std::lock_guard<std::mutex> lock{mutex_};
+	return size_;
+}
+
+std::size_t WebRequestQueue::highWaterMark() const noexcept
+{
+	const std::lock_guard<std::mutex> lock{mutex_};
+	return highWaterMark_;
+}
 }

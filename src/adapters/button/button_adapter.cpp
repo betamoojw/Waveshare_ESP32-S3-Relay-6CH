@@ -1,28 +1,9 @@
 #include "button_adapter.h"
 
-#include <Arduino.h>
-
 namespace switch_actuator::adapters::button
 {
-namespace
-{
-[[nodiscard]] std::uint8_t toArduinoPinMode(const bsp::ButtonPullMode pullMode) noexcept
-{
-	switch (pullMode)
-	{
-	case bsp::ButtonPullMode::PullUp:
-		return INPUT_PULLUP;
-	case bsp::ButtonPullMode::PullDown:
-		return INPUT_PULLDOWN;
-	case bsp::ButtonPullMode::None:
-	default:
-		return INPUT;
-	}
-}
-}
-
-ButtonAdapter::ButtonAdapter(const bsp::BoardDescriptor &descriptor, const ButtonEventHandler eventHandler, void *const eventContext) noexcept
-	: descriptor_{descriptor}, eventHandler_{eventHandler}, eventContext_{eventContext}
+ButtonAdapter::ButtonAdapter(const hal::ButtonHal buttonHal, const ButtonEventHandler eventHandler, void *const eventContext) noexcept
+	: buttonHal_{buttonHal}, eventHandler_{eventHandler}, eventContext_{eventContext}
 {
 }
 
@@ -32,8 +13,15 @@ ButtonInitializeResult ButtonAdapter::initialize(const std::uint32_t nowMs) noex
 	{
 		return ButtonInitializeResult::InvalidHandler;
 	}
+	if (!buttonHal_.isValid())
+	{
+		return ButtonInitializeResult::InvalidHal;
+	}
+	if (!buttonHal_.initialize())
+	{
+		return ButtonInitializeResult::HardwareFailure;
+	}
 
-	pinMode(descriptor_.bootButtonPin, toArduinoPinMode(descriptor_.bootButtonPullMode));
 	rawPressed_ = readPressed();
 	stablePressed_ = rawPressed_;
 	initializedAtMs_ = nowMs;
@@ -111,8 +99,7 @@ bool ButtonAdapter::isPressed() const noexcept
 
 bool ButtonAdapter::readPressed() const noexcept
 {
-	const auto levelIsHigh = digitalRead(descriptor_.bootButtonPin) == HIGH;
-	return descriptor_.bootButtonActiveLow ? !levelIsHigh : levelIsHigh;
+	return buttonHal_.isPressed();
 }
 
 ButtonUpdateResult ButtonAdapter::emit(const ButtonEventType type,

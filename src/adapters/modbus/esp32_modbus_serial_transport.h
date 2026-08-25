@@ -1,7 +1,8 @@
 #pragma once
 
 #include "modbus_rtu_adapter.h"
-#include "../bsp/board_descriptor.h"
+#include "../../hal/BoardDescriptor.h"
+#include "../../hal/Rs485Hal.h"
 
 #include <HardwareSerial.h>
 
@@ -21,7 +22,7 @@ enum class SerialTransportInitializeResult : std::uint8_t
 class Esp32ModbusSerialTransport final
 {
 public:
-	Esp32ModbusSerialTransport(HardwareSerial &serial, const bsp::BoardDescriptor &descriptor) noexcept;
+	Esp32ModbusSerialTransport(HardwareSerial &serial, const hal::BoardDescriptor &descriptor) noexcept;
 	~Esp32ModbusSerialTransport();
 
 	Esp32ModbusSerialTransport(const Esp32ModbusSerialTransport &) = delete;
@@ -30,7 +31,9 @@ public:
 	Esp32ModbusSerialTransport &operator=(Esp32ModbusSerialTransport &&) = delete;
 
 	[[nodiscard]] SerialTransportInitializeResult initialize(const ModbusRtuConfiguration &configuration) noexcept;
+	void shutdown() noexcept;
 	[[nodiscard]] bool isInitialized() const noexcept;
+	[[nodiscard]] hal::Rs485Hal hal() noexcept;
 
 	[[nodiscard]] static std::int32_t read(void *context,
 										std::uint8_t *buffer,
@@ -51,7 +54,7 @@ private:
 									  std::int32_t byteTimeoutMs) noexcept;
 
 	HardwareSerial &serial_;
-	const bsp::BoardDescriptor &descriptor_;
+	const hal::BoardDescriptor &descriptor_;
 	bool initialized_{false};
 };
 }

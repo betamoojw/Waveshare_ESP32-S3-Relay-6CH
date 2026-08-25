@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 
 namespace switch_actuator::app
 {
@@ -93,6 +94,7 @@ public:
 	[[nodiscard]] std::size_t highWaterMark() const noexcept;
 
 private:
+	mutable std::mutex mutex_{};
 	std::array<WebApplicationRequest, capacity> requests_{};
 	std::array<WebOperationResult, resultCapacity> results_{};
 	std::size_t head_{0};

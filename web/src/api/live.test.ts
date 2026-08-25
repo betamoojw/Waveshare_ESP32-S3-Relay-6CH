@@ -77,7 +77,7 @@ describe('WebSocket live events', () => {
     connectLiveEvents(queryClient)
     const socket = FakeWebSocket.instances[0]
 
-    socket.emit('message', frame('protocol.error', 0, { code: 'protocol.version_mismatch' }))
+    socket.emit('message', frame('protocol.error', 0, { code: 'protocol_error' }))
     socket.close(1006)
     vi.advanceTimersByTime(60_000)
 

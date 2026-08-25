@@ -1,9 +1,20 @@
 #include "modbus_register_map.h"
 
+#include <algorithm>
+#include <iterator>
 #include <limits>
 
 namespace switch_actuator::adapters::modbus
 {
+namespace
+{
+constexpr std::array<std::uint32_t, 5> supportedBaudRates{9600, 19200, 38400, 57600, 115200};
+constexpr std::uint16_t baudMask{0x0007};
+constexpr std::uint16_t parityMask{0x0018};
+constexpr std::uint16_t stopBitsMask{0x0020};
+constexpr std::uint16_t reservedMask{0xFFC0};
+}
+
 RegisterMapResult ModbusRegisterMap::readCoils(const std::uint16_t address,
 												  const std::uint16_t quantity,
 												  const RegisterMapSnapshot &snapshot,
@@ -269,6 +280,11 @@ RegisterMapResult ModbusRegisterMap::parseHoldingWrite(const std::uint16_t addre
 	}
 	if (quantity == 1 && address == uartSettingsHoldingAddress)
 	{
+		domain::ModbusConfiguration decoded{};
+		if (!decodeUartSettings(values[0], decoded))
+		{
+			return RegisterMapResult::IllegalValue;
+		}
 		batch.kind = HoldingWriteKind::UartSettings;
 		batch.uartEncodedSettings = values[0];
 		return RegisterMapResult::Success;
@@ -284,6 +300,51 @@ RegisterMapResult ModbusRegisterMap::parseHoldingWrite(const std::uint16_t addre
 		return RegisterMapResult::Success;
 	}
 	return RegisterMapResult::IllegalAddress;
+}
+
+bool ModbusRegisterMap::encodeUartSettings(const domain::ModbusConfiguration &configuration,
+											std::uint16_t &encoded) noexcept
+{
+	const auto baud = std::find(supportedBaudRates.begin(), supportedBaudRates.end(), configuration.baudRate);
+	if (baud == supportedBaudRates.end() || configuration.dataBits != 8 ||
+		(configuration.stopBits != 1 && configuration.stopBits != 2))
+	{
+		return false;
+	}
+	std::uint16_t parity{};
+	if (configuration.parity == domain::SerialParity::Even)
+	{
+		parity = 1;
+	}
+	else if (configuration.parity == domain::SerialParity::Odd)
+	{
+		parity = 2;
+	}
+	else if (configuration.parity != domain::SerialParity::None)
+	{
+		return false;
+	}
+	encoded = static_cast<std::uint16_t>(std::distance(supportedBaudRates.begin(), baud)) |
+		static_cast<std::uint16_t>(parity << 3U) |
+		static_cast<std::uint16_t>((configuration.stopBits - 1U) << 5U);
+	return true;
+}
+
+bool ModbusRegisterMap::decodeUartSettings(const std::uint16_t encoded,
+											domain::ModbusConfiguration &configuration) noexcept
+{
+	const auto baudIndex = static_cast<std::size_t>(encoded & baudMask);
+	const auto parity = static_cast<std::uint16_t>((encoded & parityMask) >> 3U);
+	if ((encoded & reservedMask) != 0 || baudIndex >= supportedBaudRates.size() || parity > 2)
+	{
+		return false;
+	}
+	configuration.baudRate = supportedBaudRates[baudIndex];
+	configuration.parity = parity == 0 ? domain::SerialParity::None
+		: parity == 1 ? domain::SerialParity::Even : domain::SerialParity::Odd;
+	configuration.dataBits = 8;
+	configuration.stopBits = (encoded & stopBitsMask) == 0 ? 1 : 2;
+	return true;
 }
 
 bool ModbusRegisterMap::rangeWithin(const std::uint16_t address,

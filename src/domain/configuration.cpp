@@ -138,6 +138,10 @@ ConfigurationValidationError validateConfiguration(const Configuration &configur
 	{
 		return ConfigurationValidationError::UnsupportedSchema;
 	}
+	if (!hasBoundedText(configuration.productId.value))
+	{
+		return ConfigurationValidationError::MissingProductId;
+	}
 	if (!hasBoundedText(configuration.boardModel))
 	{
 		return ConfigurationValidationError::MissingBoardModel;
@@ -153,6 +157,13 @@ ConfigurationValidationError validateConfiguration(const Configuration &configur
 	if (!hasProvisionedUuid(configuration.deviceUuid))
 	{
 		return ConfigurationValidationError::MissingDeviceUuid;
+	}
+	const auto manufacturingUnprovisioned = configuration.manufacturingDate.iso8601.front() == '\0' &&
+		configuration.manufacturingBatch == 0;
+	if (!manufacturingUnprovisioned &&
+		(configuration.manufacturingBatch == 0 || !isValid(configuration.manufacturingDate)))
+	{
+		return ConfigurationValidationError::InvalidManufacturingIdentity;
 	}
 	if (configuration.modbus.unitId < 1 || configuration.modbus.unitId > 247)
 	{

@@ -1,8 +1,12 @@
 #include "modbus_rtu_adapter.h"
 
+#include "modbus_error_representation.h"
+#include "../../domain/version_compatibility.h"
+
 #include <array>
 #include <cstring>
 #include <limits>
+#include <string_view>
 
 namespace switch_actuator::adapters::modbus
 {
@@ -13,14 +17,16 @@ constexpr std::uint32_t maximumClientResponseBytes{45};
 constexpr std::uint32_t clientTimingMarginCharacters{4};
 constexpr std::int32_t minimumClientResponseTimeoutMs{20};
 
-template <std::size_t Size>
-void copyIdentification(char *const destination, const char (&source)[Size]) noexcept
+void copyIdentification(char *const destination, const std::string_view source) noexcept
 {
 	std::memset(destination, 0, NMBS_DEVICE_IDENTIFICATION_STRING_LENGTH);
-	constexpr auto copyLength = Size - 1 < NMBS_DEVICE_IDENTIFICATION_STRING_LENGTH - 1
-								? Size - 1
-								: NMBS_DEVICE_IDENTIFICATION_STRING_LENGTH - 1;
-	std::memcpy(destination, source, copyLength);
+	const auto copyLength = source.size() < NMBS_DEVICE_IDENTIFICATION_STRING_LENGTH - 1
+							? source.size()
+							: NMBS_DEVICE_IDENTIFICATION_STRING_LENGTH - 1;
+	if (copyLength != 0)
+	{
+		std::memcpy(destination, source.data(), copyLength);
+	}
 }
 }
 
@@ -340,16 +346,16 @@ nmbs_error ModbusRtuAdapter::writeMultipleCoils(const std::uint16_t address,
 
 nmbs_error ModbusRtuAdapter::writeSingleRegister(const std::uint16_t address,
 														  const std::uint16_t value,
-														  const std::uint8_t,
+														  const std::uint8_t unitId,
 														  void *const context) noexcept
 {
-	return writeMultipleRegisters(address, 1, &value, 0, context);
+	return writeMultipleRegisters(address, 1, &value, unitId, context);
 }
 
 nmbs_error ModbusRtuAdapter::writeMultipleRegisters(const std::uint16_t address,
 														   const std::uint16_t quantity,
 														   const std::uint16_t *const values,
-														   const std::uint8_t,
+														   const std::uint8_t unitId,
 														   void *const context) noexcept
 {
 	auto &adapter = *static_cast<ModbusRtuAdapter *>(context);
@@ -361,6 +367,11 @@ nmbs_error ModbusRtuAdapter::writeMultipleRegisters(const std::uint16_t address,
 		adapter.nextCorrelationId(),
 		adapter.dependencies_.diagnostics->snapshot().uptimeMs,
 		batch);
+	if (result == RegisterMapResult::Success && unitId == NMBS_BROADCAST_ADDRESS &&
+		(batch.kind == HoldingWriteKind::UartSettings || batch.kind == HoldingWriteKind::UnitId))
+	{
+		return NMBS_EXCEPTION_ILLEGAL_DATA_ADDRESS;
+	}
 	return result == RegisterMapResult::Success ? adapter.submit(batch) : toException(result);
 }
 
@@ -376,11 +387,7 @@ nmbs_error ModbusRtuAdapter::readDeviceIdentification(const std::uint8_t objectI
 		copyIdentification(buffer, "Waveshare-ESP32S3-Relay6CH");
 		return NMBS_ERROR_NONE;
 	case 0x02:
-#ifdef FIRMWARE_VERSION
-		copyIdentification(buffer, FIRMWARE_VERSION);
-#else
-		copyIdentification(buffer, "development");
-#endif
+		copyIdentification(buffer, domain::compatibility::firmware);
 		return NMBS_ERROR_NONE;
 	default:
 		return NMBS_EXCEPTION_ILLEGAL_DATA_ADDRESS;
@@ -432,12 +439,12 @@ nmbs_error ModbusRtuAdapter::toException(const RegisterMapResult result) noexcep
 	case RegisterMapResult::Success:
 		return NMBS_ERROR_NONE;
 	case RegisterMapResult::IllegalAddress:
-		return NMBS_EXCEPTION_ILLEGAL_DATA_ADDRESS;
+		return represent(domain::ErrorCode::NotFound);
 	case RegisterMapResult::IllegalValue:
-		return NMBS_EXCEPTION_ILLEGAL_DATA_VALUE;
+		return represent(domain::ErrorCode::InvalidArgument);
 	case RegisterMapResult::InvalidBuffer:
 	default:
-		return NMBS_EXCEPTION_SERVER_DEVICE_FAILURE;
+		return represent(domain::ErrorCode::InternalError);
 	}
 }
 
@@ -449,22 +456,22 @@ nmbs_error ModbusRtuAdapter::provideSnapshot(RegisterMapSnapshot &snapshot) noex
 
 nmbs_error ModbusRtuAdapter::submit(const HoldingWriteBatch &batch) noexcept
 {
-	switch (dependencies_.writeBatchHandler(dependencies_.writeBatchContext, batch))
+	const auto error = dependencies_.writeBatchHandler(dependencies_.writeBatchContext, batch);
+	if (!error.has_value())
 	{
-	case WriteBatchResult::Accepted:
 		requestHandled_ = true;
 		dependencies_.diagnostics->recordModbus(app::ModbusDiagnosticEvent::ValidRequest);
 		return NMBS_ERROR_NONE;
-	case WriteBatchResult::IllegalValue:
-		dependencies_.diagnostics->recordModbus(app::ModbusDiagnosticEvent::IllegalValue);
-		return NMBS_EXCEPTION_ILLEGAL_DATA_VALUE;
-	case WriteBatchResult::QueueFull:
-		dependencies_.diagnostics->recordCommandQueueFull(dependencies_.diagnostics->snapshot().uptimeMs);
-		return NMBS_EXCEPTION_SERVER_DEVICE_FAILURE;
-	case WriteBatchResult::Failure:
-	default:
-		return NMBS_EXCEPTION_SERVER_DEVICE_FAILURE;
 	}
+	if (*error == domain::ErrorCode::InvalidArgument || *error == domain::ErrorCode::ConfigurationError)
+	{
+		dependencies_.diagnostics->recordModbus(app::ModbusDiagnosticEvent::IllegalValue);
+	}
+	else if (*error == domain::ErrorCode::Busy)
+	{
+		dependencies_.diagnostics->recordCommandQueueFull(dependencies_.diagnostics->snapshot().uptimeMs);
+	}
+	return represent(*error);
 }
 
 std::uint32_t ModbusRtuAdapter::nextCorrelationId() noexcept

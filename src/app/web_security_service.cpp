@@ -33,6 +33,7 @@ WebSecurityService::WebSecurityService(const ports::WebSecurityStore store,
 WebSecurityInitializeResult WebSecurityService::initialize(const std::string_view expectedOrigin,
 	const std::string_view expectedHost) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	initialized_ = false;
 	sessions_.fill({});
 	if (!store_.isValid() || !crypto_.isValid() || !clock_.isValid() ||
@@ -46,10 +47,11 @@ WebSecurityInitializeResult WebSecurityService::initialize(const std::string_vie
 	{
 		return WebSecurityInitializeResult::NotProvisioned;
 	}
-	if (loadResult != ports::WebSecurityStoreResult::Applied || !recordIsValid(record_))
+	if (loadResult != ports::WebSecurityStoreResult::Applied || !securityIdentityIsValid(record_))
 	{
 		return WebSecurityInitializeResult::InvalidRecord;
 	}
+	if (!recordIsValid(record_)) return WebSecurityInitializeResult::NotProvisioned;
 	loginWindowStartedAtMs_ = clock_.nowMs();
 	loginFailures_ = 0;
 	initialized_ = true;
@@ -60,6 +62,7 @@ WebSessionResult WebSecurityService::createSession(const std::string_view userna
 	const std::string_view password,
 	WebSessionCreated &created) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	created = {};
 	if (!initialized_ || username.empty() || username.size() >= ports::webUsernameCapacity || password.empty() ||
 		password.size() > 128U)
@@ -139,6 +142,7 @@ WebSessionResult WebSecurityService::createSession(const std::string_view userna
 
 WebSessionResult WebSecurityService::inspectSession(const std::string_view jwt, WebSessionView &view) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	view = {};
 	auto *session = findSession(jwt);
 	const auto nowMs = clock_.nowMs();
@@ -152,6 +156,7 @@ WebSessionResult WebSecurityService::deleteSession(const std::string_view jwt,
 	const std::string_view host,
 	const std::string_view csrfToken) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	auto *session = findSession(jwt);
 	const auto nowMs = clock_.nowMs();
 	if (session == nullptr || !validateSession(*session, jwt, nowMs) ||
@@ -166,6 +171,7 @@ WebSessionResult WebSecurityService::deleteSession(const std::string_view jwt,
 
 std::size_t WebSecurityService::users(std::array<WebUserView, ports::webUserCapacity> &users) const noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	users.fill({});
 	std::size_t count{0};
 	for (const auto &record : record_.users)
@@ -187,6 +193,7 @@ WebUserManagementResult WebSecurityService::saveUser(const std::uint32_t id,
 	const std::string_view password,
 	const bool replacePassword) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	if (!initialized_ || username.empty() || username.size() >= ports::webUsernameCapacity ||
 		(replacePassword && (password.size() < 12U || password.size() > 128U)))
 		return WebUserManagementResult::Invalid;
@@ -234,13 +241,16 @@ WebUserManagementResult WebSecurityService::provisionInitialAdministrator(const 
 	const std::string_view password,
 	const std::string_view hostName) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	if (!store_.isValid() || !crypto_.isValid() || username.empty() || username.size() >= ports::webUsernameCapacity ||
 		password.size() < 12U || password.size() > 128U || hostName.empty() || hostName.size() >= expectedHost_.size())
 		return WebUserManagementResult::Invalid;
-	ports::WebSecurityRecord replacement{};
-	if (!crypto_.random(replacement.signingKey.data(), replacement.signingKey.size()) ||
-		!crypto_.generateIdentity(hostName, replacement.certificate.data(), replacement.certificate.size(),
-			replacement.privateKey.data(), replacement.privateKey.size())) return WebUserManagementResult::CryptoFailure;
+	auto replacement = record_;
+	replacement.users.fill({});
+	if (!securityIdentityIsValid(replacement) &&
+		(!crypto_.random(replacement.signingKey.data(), replacement.signingKey.size()) ||
+		 !crypto_.generateIdentity(hostName, replacement.certificate.data(), replacement.certificate.size(),
+			replacement.privateKey.data(), replacement.privateKey.size()))) return WebUserManagementResult::CryptoFailure;
 	auto &administrator = replacement.users[0];
 	administrator.id = 1;
 	administrator.role = ports::WebUserRole::Administrator;
@@ -260,8 +270,34 @@ WebUserManagementResult WebSecurityService::provisionInitialAdministrator(const 
 	return WebUserManagementResult::Applied;
 }
 
+ports::WebSecurityStoreResult WebSecurityService::eraseUsersPreservingIdentity() noexcept
+{
+	const std::lock_guard<std::mutex> lock{mutex_};
+	if (!store_.isValid()) return ports::WebSecurityStoreResult::IoFailure;
+	ports::WebSecurityRecord replacement{};
+	const auto loadResult = store_.load(replacement);
+	if (loadResult == ports::WebSecurityStoreResult::NotFound)
+	{
+		initialized_ = false;
+		sessions_.fill({});
+		record_ = {};
+		return ports::WebSecurityStoreResult::Applied;
+	}
+	if (loadResult != ports::WebSecurityStoreResult::Applied || !securityIdentityIsValid(replacement))
+		return loadResult == ports::WebSecurityStoreResult::Applied ?
+			ports::WebSecurityStoreResult::InvalidRecord : loadResult;
+	replacement.users.fill({});
+	if (store_.save(replacement) != ports::WebSecurityStoreResult::Applied)
+		return ports::WebSecurityStoreResult::IoFailure;
+	initialized_ = false;
+	sessions_.fill({});
+	record_ = replacement;
+	return ports::WebSecurityStoreResult::Applied;
+}
+
 ports::WebSecurityStoreResult WebSecurityService::erase() noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	initialized_ = false;
 	sessions_.fill({});
 	record_ = {};
@@ -273,7 +309,11 @@ ports::WebSecurityPort WebSecurityService::port() noexcept
 	return {certificateHandler, privateKeyHandler, authorizeHandler, this};
 }
 
-bool WebSecurityService::isInitialized() const noexcept { return initialized_; }
+bool WebSecurityService::isInitialized() const noexcept
+{
+	const std::lock_guard<std::mutex> lock{mutex_};
+	return initialized_;
+}
 
 std::string_view WebSecurityService::certificateHandler(void *const context) noexcept
 {
@@ -287,7 +327,7 @@ std::string_view WebSecurityService::privateKeyHandler(void *const context) noex
 	return {service.record_.privateKey.data(), strnlen(service.record_.privateKey.data(), service.record_.privateKey.size()) + 1U};
 }
 
-bool WebSecurityService::authorizeHandler(void *const context,
+ports::WebAuthorizationResult WebSecurityService::authorizeHandler(void *const context,
 	const std::string_view sessionToken,
 	const std::string_view origin,
 	const std::string_view host,
@@ -300,7 +340,7 @@ bool WebSecurityService::authorizeHandler(void *const context,
 		permission, mutation, authorization);
 }
 
-bool WebSecurityService::authorize(const std::string_view sessionToken,
+ports::WebAuthorizationResult WebSecurityService::authorize(const std::string_view sessionToken,
 	const std::string_view origin,
 	const std::string_view host,
 	const std::string_view csrfToken,
@@ -308,23 +348,29 @@ bool WebSecurityService::authorize(const std::string_view sessionToken,
 	const bool mutation,
 	ports::WebAuthorization &authorization) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	authorization = {};
 	auto *session = findSession(sessionToken);
 	const auto nowMs = clock_.nowMs();
 	const auto permissionMask = static_cast<std::uint32_t>(permission);
-	if (session == nullptr || !validateSession(*session, sessionToken, nowMs) ||
-		!constantTimeEqual(host, expectedHost_.data()) || (session->permissions & permissionMask) != permissionMask)
+	if (session == nullptr || !validateSession(*session, sessionToken, nowMs))
 	{
-		return false;
+		return ports::WebAuthorizationResult::Unauthenticated;
 	}
-	if (mutation && (!constantTimeEqual(origin, expectedOrigin_.data()) ||
-		!constantTimeEqual(csrfToken, session->csrfToken.data()) || !mutationAllowed(*session, permission, nowMs)))
+	if (!constantTimeEqual(host, expectedHost_.data()) ||
+		(session->permissions & permissionMask) != permissionMask ||
+		(mutation && (!constantTimeEqual(origin, expectedOrigin_.data()) ||
+			!constantTimeEqual(csrfToken, session->csrfToken.data()))) ||
+		(!origin.empty() && !constantTimeEqual(origin, expectedOrigin_.data())))
 	{
-		return false;
+		return ports::WebAuthorizationResult::Forbidden;
 	}
-	if (!origin.empty() && !constantTimeEqual(origin, expectedOrigin_.data())) return false;
+	if (mutation && !mutationAllowed(*session, permission, nowMs))
+	{
+		return ports::WebAuthorizationResult::RateLimited;
+	}
 	authorization = {session->id, session->permissions};
-	return true;
+	return ports::WebAuthorizationResult::Authorized;
 }
 
 WebSecurityService::Session *WebSecurityService::findSession(const std::string_view jwt) noexcept
@@ -478,17 +524,22 @@ std::size_t WebSecurityService::base64UrlEncode(const std::uint8_t *const input,
 	return outputIndex;
 }
 
-bool WebSecurityService::recordIsValid(const ports::WebSecurityRecord &record) noexcept
+bool WebSecurityService::securityIdentityIsValid(const ports::WebSecurityRecord &record) noexcept
 {
 	const auto signingKeyPresent = std::any_of(record.signingKey.begin(), record.signingKey.end(),
 		[](const auto value) { return value != 0; });
+	return record.schemaVersion == 1U && record.signingGeneration != 0U && signingKeyPresent &&
+		record.certificate[0] != '\0' && record.privateKey[0] != '\0' &&
+		record.certificate.back() == '\0' && record.privateKey.back() == '\0';
+}
+
+bool WebSecurityService::recordIsValid(const ports::WebSecurityRecord &record) noexcept
+{
 	const auto administratorPresent = std::any_of(record.users.begin(), record.users.end(), [](const auto &user) {
 		return user.enabled && user.role == ports::WebUserRole::Administrator && user.id != 0 &&
 			user.username[0] != '\0' && user.passwordIterations >= 100'000U;
 	});
-	return record.schemaVersion == 1U && record.signingGeneration != 0U && signingKeyPresent &&
-		administratorPresent && record.certificate[0] != '\0' && record.privateKey[0] != '\0' &&
-		record.certificate.back() == '\0' && record.privateKey.back() == '\0';
+	return securityIdentityIsValid(record) && administratorPresent;
 }
 
 void WebSecurityService::fillView(const Session &session,

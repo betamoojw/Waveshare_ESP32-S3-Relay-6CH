@@ -20,6 +20,15 @@ export const relaySchema = z.object({
 export const capabilitiesSchema = z.object({
   apiVersion: z.string(),
   minimumUiVersion: z.string(),
+  versions: z.object({
+    hardware: z.string(),
+    firmware: z.string(),
+    configuration: z.string(),
+    api: z.string(),
+    modbus: z.string(),
+    knxApplication: z.string(),
+    filesystem: z.string(),
+  }),
   deviceId: z.string(),
   bootId: z.string(),
   model: z.string(),
@@ -55,7 +64,8 @@ export const deviceSchema = z.object({
 })
 
 export const networkSchema = z.object({
-  state: z.enum(['disabled', 'connecting', 'online', 'recovery-ap']),
+  state: z.enum(['disabled', 'connecting', 'online', 'recovery-ap', 'connecting-ethernet', 'online-ethernet']),
+  activeTransport: z.enum(['none', 'wifi', 'ethernet']),
   ipv4Address: z.string().nullable(),
   rssi: z.number().int(),
   activeProfileIndex: z.number().int().nullable(),
@@ -167,6 +177,60 @@ export const otaStatusSchema = z.object({
 })
 
 export const diagnosticsSchema = z.object({
+  device: z.object({
+    uptimeMs: z.number().int().nonnegative(),
+    bootCount: z.number().int().nonnegative(),
+    resetReason: z.enum(['power-on', 'controlled-restart', 'brownout', 'watchdog', 'panic', 'repeated-boot', 'unknown']),
+    lifecycle: z.enum(['operational', 'degraded']),
+  }).optional(),
+  persistentCounters: z.object({
+    bootCount: z.number().int().nonnegative(),
+    watchdogCount: z.number().int().nonnegative(),
+    brownoutCount: z.number().int().nonnegative(),
+    configErrorCount: z.number().int().nonnegative(),
+    otaFailureCount: z.number().int().nonnegative(),
+    networkFailureCount: z.number().int().nonnegative(),
+    modbusErrorCount: z.number().int().nonnegative(),
+    knxErrorCount: z.number().int().nonnegative(),
+    storageErrorCount: z.number().int().nonnegative(),
+  }).optional(),
+  firmware: z.object({ version: z.string(), buildId: z.string() }).optional(),
+  hardware: z.object({ model: z.string(), revision: z.string() }).optional(),
+  memory: z.object({
+    freeHeapBytes: z.number().int().nonnegative(),
+    minimumFreeHeapBytes: z.number().int().nonnegative(),
+    largestFreeHeapBlockBytes: z.number().int().nonnegative(),
+    psram: z.object({
+      available: z.boolean(),
+      totalBytes: z.number().int().nonnegative(),
+      freeBytes: z.number().int().nonnegative(),
+      minimumFreeBytes: z.number().int().nonnegative(),
+    }),
+  }).optional(),
+  cpu: z.object({ frequencyMhz: z.number().int().nonnegative(), coreCount: z.number().int().nonnegative() }).optional(),
+  network: z.object({
+    state: z.enum(['disabled', 'connecting', 'online', 'recovery-ap']),
+    connected: z.boolean(),
+    recoveryApActive: z.boolean(),
+    wifiRssiDbm: z.number().int(),
+    ipv4Address: z.string().nullable(),
+  }).optional(),
+  storage: z.object({
+    filesystemAvailable: z.boolean(),
+    settingsAvailable: z.boolean(),
+    settingsHealthy: z.boolean(),
+    configurationValid: z.boolean(),
+    configurationGeneration: z.number().int().nonnegative(),
+  }).optional(),
+  faultState: z.object({ active: z.boolean(), activeCount: z.number().int().nonnegative() }).optional(),
+  relays: z.array(z.object({
+    id: z.number().int().nonnegative(),
+    requestedState: relayStateSchema,
+    appliedState: relayStateSchema,
+    lockedOut: z.boolean(),
+    faulted: z.boolean(),
+    transitionSequence: z.number().int().nonnegative(),
+  })).optional(),
   configurationValid: z.boolean(),
   persistenceHealthy: z.boolean(),
   taskWatchdogHealthy: z.boolean(),

@@ -1,23 +1,19 @@
 #include "status_indicator.h"
 
-#include <Arduino.h>
-
 #include <array>
 
 namespace switch_actuator::adapters::indicators
 {
 namespace
 {
-constexpr std::uint32_t buzzerBaseFrequencyHz{2000};
-constexpr std::uint8_t buzzerResolutionBits{8};
 constexpr std::uint32_t commissioningPeriodMs{1000};
 constexpr std::uint32_t degradedBusPeriodMs{1000};
 constexpr std::uint32_t commandToneDurationMs{60};
 constexpr std::array<std::uint16_t, 8> maintenanceToneFrequencies{0, 523, 659, 784, 1047, 1319, 1568, 2093};
 }
 
-StatusIndicator::StatusIndicator(const bsp::BoardDescriptor &descriptor) noexcept
-	: descriptor_{descriptor}
+StatusIndicator::StatusIndicator(const hal::RgbLedHal rgbLedHal, const hal::BuzzerHal buzzerHal) noexcept
+	: rgbLedHal_{rgbLedHal}, buzzerHal_{buzzerHal}
 {
 }
 
@@ -26,21 +22,21 @@ StatusIndicator::~StatusIndicator()
 	if (initialized_)
 	{
 		silenceAndTurnOff();
-		static_cast<void>(ledcDetach(descriptor_.buzzerPin));
 	}
 }
 
 IndicatorResult StatusIndicator::initialize() noexcept
 {
 	initialized_ = false;
-	rgbLedWrite(descriptor_.rgbLedPin, 0, 0, 0);
-
-	if (!ledcAttach(descriptor_.buzzerPin, buzzerBaseFrequencyHz, buzzerResolutionBits))
+	if (!rgbLedHal_.isValid() || !buzzerHal_.isValid() || !rgbLedHal_.write(0, 0, 0) || !buzzerHal_.initialize())
 	{
 		return IndicatorResult::HardwareFailure;
 	}
 
-	static_cast<void>(ledcWriteTone(descriptor_.buzzerPin, 0));
+	if (!buzzerHal_.write(0, 0))
+	{
+		return IndicatorResult::HardwareFailure;
+	}
 	appliedOutput_ = offOutput;
 	initialized_ = true;
 	return IndicatorResult::Applied;
@@ -223,23 +219,17 @@ IndicatorResult StatusIndicator::apply(const OutputState &output) noexcept
 {
 	if (output.red != appliedOutput_.red || output.green != appliedOutput_.green || output.blue != appliedOutput_.blue)
 	{
-		rgbLedWrite(descriptor_.rgbLedPin, output.red, output.green, output.blue);
+		if (!rgbLedHal_.write(output.red, output.green, output.blue))
+		{
+			return IndicatorResult::HardwareFailure;
+		}
 	}
 
 	if (output.toneHz != appliedOutput_.toneHz || output.buzzerDutyPercent != appliedOutput_.buzzerDutyPercent)
 	{
-		const auto appliedFrequency = ledcWriteTone(descriptor_.buzzerPin, output.toneHz);
-		if (output.toneHz != 0 && appliedFrequency == 0)
+		if (!buzzerHal_.write(output.toneHz, output.buzzerDutyPercent))
 		{
 			return IndicatorResult::HardwareFailure;
-		}
-		if (output.toneHz != 0)
-		{
-			const auto duty = static_cast<std::uint32_t>((255U * output.buzzerDutyPercent) / 100U);
-			if (!ledcWrite(descriptor_.buzzerPin, duty))
-			{
-				return IndicatorResult::HardwareFailure;
-			}
 		}
 	}
 
@@ -249,8 +239,8 @@ IndicatorResult StatusIndicator::apply(const OutputState &output) noexcept
 
 void StatusIndicator::silenceAndTurnOff() noexcept
 {
-	static_cast<void>(ledcWriteTone(descriptor_.buzzerPin, 0));
-	rgbLedWrite(descriptor_.rgbLedPin, 0, 0, 0);
+	static_cast<void>(buzzerHal_.write(0, 0));
+	static_cast<void>(rgbLedHal_.write(0, 0, 0));
 	appliedOutput_ = offOutput;
 }
 }

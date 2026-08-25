@@ -18,30 +18,86 @@ namespace
 		   policy == RestorePolicy::ConfiguredDefault;
 }
 
-[[nodiscard]] bool isAbnormal(const ResetCategory category) noexcept
-{
-	return category == ResetCategory::Brownout || category == ResetCategory::Watchdog || category == ResetCategory::Panic ||
-		   category == ResetCategory::RepeatedBoot || category == ResetCategory::Unknown;
 }
 
-[[nodiscard]] RelayState restoredState(const RelayChannelConfiguration &configuration,
-															const RelayRestoreContext &context,
-															const std::size_t channel) noexcept
+RelayState resolveRelayBootState(const RelayBootState bootState,
+	const RelayChannelConfiguration &configuration,
+	const PersistedRelayState &persisted,
+	const std::size_t channel) noexcept
 {
-	if (!configuration.enabled || configuration.restorePolicy == RestorePolicy::AllOff)
+	if (!configuration.enabled || channel >= persisted.states.size())
 	{
 		return RelayState::Off;
 	}
-	if (configuration.restorePolicy == RestorePolicy::ConfiguredDefault)
+	const auto configuredState = isValid(configuration.configuredDefault) ?
+		configuration.configuredDefault : RelayState::Off;
+	const auto lastState = persisted.valid && isValid(persisted.states[channel]) ?
+		persisted.states[channel] : RelayState::Off;
+
+	switch (bootState)
 	{
-		return configuration.configuredDefault;
-	}
-	if (!context.persisted.valid || (isAbnormal(context.resetCategory) && !context.allowLastKnownAfterAbnormalReset))
-	{
+	case RelayBootState::Off:
+	case RelayBootState::SafeState:
+		return RelayState::Off;
+	case RelayBootState::On:
+		return RelayState::On;
+	case RelayBootState::ConfiguredState:
+		return configuredState;
+	case RelayBootState::LastState:
+		return lastState;
+	case RelayBootState::Restore:
+		if (configuration.restorePolicy == RestorePolicy::ConfiguredDefault)
+		{
+			return configuredState;
+		}
+		if (configuration.restorePolicy == RestorePolicy::LastKnown)
+		{
+			return lastState;
+		}
 		return RelayState::Off;
 	}
-	return context.persisted.states[channel];
+	return RelayState::Off;
 }
+
+RelaySafetyEvent relaySafetyEventForReset(const ResetCategory category) noexcept
+{
+	switch (category)
+	{
+	case ResetCategory::PowerOn:
+		return RelaySafetyEvent::PowerOn;
+	case ResetCategory::ControlledRestart:
+		return RelaySafetyEvent::SoftwareReboot;
+	case ResetCategory::Brownout:
+		return RelaySafetyEvent::Brownout;
+	case ResetCategory::Watchdog:
+		return RelaySafetyEvent::WatchdogReset;
+	case ResetCategory::Panic:
+	case ResetCategory::RepeatedBoot:
+	case ResetCategory::Unknown:
+		return RelaySafetyEvent::WatchdogReset;
+	}
+	return RelaySafetyEvent::WatchdogReset;
+}
+
+RelayBootState relayBootStateFor(const RelaySafetyEvent event) noexcept
+{
+	switch (event)
+	{
+	case RelaySafetyEvent::PowerOn:
+	case RelaySafetyEvent::SoftwareReboot:
+		return RelayBootState::Restore;
+	case RelaySafetyEvent::Brownout:
+	case RelaySafetyEvent::WatchdogReset:
+		return RelayBootState::SafeState;
+	case RelaySafetyEvent::OtaReboot:
+		return RelayBootState::ConfiguredState;
+	case RelaySafetyEvent::FactoryReset:
+		return RelayBootState::Off;
+	case RelaySafetyEvent::ConfigurationUpdate:
+	case RelaySafetyEvent::NetworkFailure:
+		return RelayBootState::LastState;
+	}
+	return RelayBootState::SafeState;
 }
 
 RelayRestorePlanResult makeRelayRestorePlan(
@@ -71,7 +127,8 @@ RelayRestorePlanResult makeRelayRestorePlan(
 
 	for (std::uint8_t channel = 0; channel < relayChannelCount; ++channel)
 	{
-		const auto state = restoredState(channelConfigurations[channel], context, channel);
+		const auto state = resolveRelayBootState(
+			relayBootStateFor(context.event), channelConfigurations[channel], context.persisted, channel);
 		plan.commands[channel] = RelayCommand{
 			RelayChannelId{channel},
 			state == RelayState::On ? RelayAction::SetOn : RelayAction::SetOff,

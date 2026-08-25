@@ -9,17 +9,14 @@
 namespace switch_actuator::adapters::modbus
 {
 Esp32ModbusSerialTransport::Esp32ModbusSerialTransport(HardwareSerial &serial,
-															   const bsp::BoardDescriptor &descriptor) noexcept
+													   const hal::BoardDescriptor &descriptor) noexcept
 	: serial_{serial}, descriptor_{descriptor}
 {
 }
 
 Esp32ModbusSerialTransport::~Esp32ModbusSerialTransport()
 {
-	if (initialized_)
-	{
-		serial_.end();
-	}
+	shutdown();
 }
 
 SerialTransportInitializeResult Esp32ModbusSerialTransport::initialize(const ModbusRtuConfiguration &configuration) noexcept
@@ -34,9 +31,13 @@ SerialTransportInitializeResult Esp32ModbusSerialTransport::initialize(const Mod
 	{
 		return SerialTransportInitializeResult::InvalidConfiguration;
 	}
+	if (!descriptor_.rs485.available)
+	{
+		return SerialTransportInitializeResult::InvalidPins;
+	}
 
-	const auto rxPin = static_cast<gpio_num_t>(descriptor_.modbusRxPin);
-	const auto txPin = static_cast<gpio_num_t>(descriptor_.modbusTxPin);
+	const auto rxPin = static_cast<gpio_num_t>(descriptor_.rs485.rxPin);
+	const auto txPin = static_cast<gpio_num_t>(descriptor_.rs485.txPin);
 	if (!GPIO_IS_VALID_GPIO(rxPin) || !GPIO_IS_VALID_OUTPUT_GPIO(txPin))
 	{
 		return SerialTransportInitializeResult::InvalidPins;
@@ -44,8 +45,8 @@ SerialTransportInitializeResult Esp32ModbusSerialTransport::initialize(const Mod
 
 	serial_.begin(configuration.baudRate,
 		*config,
-		static_cast<std::int8_t>(descriptor_.modbusRxPin),
-		static_cast<std::int8_t>(descriptor_.modbusTxPin));
+		static_cast<std::int8_t>(descriptor_.rs485.rxPin),
+		static_cast<std::int8_t>(descriptor_.rs485.txPin));
 	if (!serial_)
 	{
 		serial_.end();
@@ -59,6 +60,11 @@ SerialTransportInitializeResult Esp32ModbusSerialTransport::initialize(const Mod
 bool Esp32ModbusSerialTransport::isInitialized() const noexcept
 {
 	return initialized_;
+}
+
+hal::Rs485Hal Esp32ModbusSerialTransport::hal() noexcept
+{
+	return {read, write, this};
 }
 
 std::int32_t Esp32ModbusSerialTransport::read(void *const context,
@@ -165,5 +171,15 @@ std::int32_t Esp32ModbusSerialTransport::writeBytes(const std::uint8_t *const bu
 		yield();
 	}
 	return static_cast<std::int32_t>(written);
+}
+
+void Esp32ModbusSerialTransport::shutdown() noexcept
+{
+	if (!initialized_)
+	{
+		return;
+	}
+	serial_.end();
+	initialized_ = false;
 }
 }

@@ -4,3 +4,10 @@
 .vscode/launch.json
 .vscode/ipch
 .DS_Store
+.venv/
+production-manifests/
+production-secrets/
+/release/
+*.pem
+*.key
+*-signed.bin

@@ -63,7 +63,7 @@ Note:
     ui.json
 ```
   The repository sources these files from `data/config/`. Runtime configuration
-  precedence and recovery rules are defined in `design/filesystem-architecture.md`.
+  precedence and recovery rules are defined in `docs/architecture/filesystem.md`.
 
 
 ## Hardware Platform Info
@@ -103,7 +103,7 @@ Long-press or factory-reset functionality can be implemented at the application 
 
 ## Software/Firmware Architecture 
 
-Check: `design/software-architecture-instructions.md`
+Check: `docs/architecture/system.md`
 
 ## Front-end Web UI 
 
@@ -111,11 +111,11 @@ Check: `design/fontend-instructions`
 
 ## KNX Switch Actuator
 
-Check: `design/knx_ip_switching_actuator-instructions.md`
+Check: `docs/protocols/knx-ip.md`
 
 
 ## Network Connectivity
 
-Check: `design/network-architecture.md`
+Check: `docs/architecture/network.md`
 1. for Wi-Fi provisioning leverage the (https://github.com/tostmann/improv-wifi-busware.git) lib.
 2. for ethernet manaager leverage the networking-for-arduino/EthernetESP32@^1.0.2 lib. However this is out of scope in the current implementation.

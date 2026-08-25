@@ -20,6 +20,28 @@ enum class ResetCategory : std::uint8_t
 	Unknown
 };
 
+enum class RelayBootState : std::uint8_t
+{
+	Off,
+	On,
+	Restore,
+	LastState,
+	SafeState,
+	ConfiguredState
+};
+
+enum class RelaySafetyEvent : std::uint8_t
+{
+	PowerOn,
+	Brownout,
+	WatchdogReset,
+	SoftwareReboot,
+	OtaReboot,
+	FactoryReset,
+	ConfigurationUpdate,
+	NetworkFailure
+};
+
 struct PersistedRelayState final
 {
 	std::array<RelayState, relayChannelCount> states{};
@@ -28,9 +50,8 @@ struct PersistedRelayState final
 
 struct RelayRestoreContext final
 {
-	ResetCategory resetCategory{ResetCategory::Unknown};
+	RelaySafetyEvent event{RelaySafetyEvent::WatchdogReset};
 	PersistedRelayState persisted{};
-	bool allowLastKnownAfterAbnormalReset{false};
 	std::uint32_t firstCorrelationId{0};
 	std::uint32_t nowMs{0};
 };
@@ -48,6 +69,13 @@ enum class RelayRestorePlanResult : std::uint8_t
 	InvalidPersistedState,
 	CorrelationOverflow
 };
+
+[[nodiscard]] RelaySafetyEvent relaySafetyEventForReset(ResetCategory category) noexcept;
+[[nodiscard]] RelayBootState relayBootStateFor(RelaySafetyEvent event) noexcept;
+[[nodiscard]] RelayState resolveRelayBootState(RelayBootState bootState,
+	const RelayChannelConfiguration &configuration,
+	const PersistedRelayState &persisted,
+	std::size_t channel) noexcept;
 
 [[nodiscard]] RelayRestorePlanResult makeRelayRestorePlan(
 	const std::array<RelayChannelConfiguration, relayChannelCount> &channelConfigurations,

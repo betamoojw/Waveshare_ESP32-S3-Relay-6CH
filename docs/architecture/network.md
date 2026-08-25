@@ -1,5 +1,8 @@
-# Network Architecture Requirements
-**Important** Ethernet manaager is out of scope in the current implementation.
+# Network Architecture
+
+**Important:** Ethernet management is out of scope in the current implementation.
+
+The implemented adapter boundary and Waveshare non-support decision are defined in [Ethernet adapter preparation](../../design/ethernet-adapter-preparation.md).
 
 ## 1. Purpose and Status
 
@@ -7,7 +10,7 @@ This document defines the normative Wi-Fi and Ethernet requirements for the Swit
 
 The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are requirements. This design is informed by WLED's proven model of multiple saved Wi-Fi networks, automatic recovery access-point mode, and optional wired Ethernet, but it is adapted to a safety-oriented relay actuator.
 
-The firmware MUST use C++17 and follow the ports-and-adapters dependency rules in `design/software-architecture-instructions.md`.
+The firmware MUST use C++17 and follow the ports-and-adapters dependency rules in [System architecture](system.md).
 
 ## 2. Design Goals
 
@@ -207,4 +210,4 @@ The implementation is complete only when automated tests and hardware validation
 
 - [WLED source repository](https://github.com/wled/WLED): multiple Wi-Fi profiles, automatic AP fallback, optional Ethernet support, and OTA operation.
 - [WLED Ethernet compatibility guidance](https://kno.wled.ge/features/ethernet-lan/): Ethernet requires board-specific hardware, pin assignments, and compiled support.
-- `design/software-architecture-instructions.md`: firmware layering, lifecycle, safety, persistence, and command-arbitration requirements.
+- [System architecture](system.md): firmware layering, lifecycle, safety, persistence, and command-arbitration requirements.

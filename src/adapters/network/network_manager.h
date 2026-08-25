@@ -4,7 +4,10 @@
 #include "../../app/wifi_management_service.h"
 #include "../../ports/network_control_port.h"
 #include "../../ports/network_status_port.h"
-#include "../bsp/board_descriptor.h"
+#include "../../hal/BoardDescriptor.h"
+#include "../../hal/NetworkHal.h"
+#include "../../ports/ethernet_adapter_port.h"
+#include "wifi_adapter.h"
 
 #include <Arduino.h>
 #include <ImprovWiFiLibrary.h>
@@ -16,11 +19,21 @@ namespace switch_actuator::adapters::network
 class NetworkManager final
 {
 public:
-	NetworkManager(const bsp::BoardDescriptor &board,
+	NetworkManager(const hal::BoardDescriptor &board,
 		app::ConfigurationService &configurationService,
 		app::WifiManagementService &wifiManagementService,
+		WifiAdapter &wifiAdapter,
+		ports::EthernetAdapterPort ethernetAdapter,
 		Stream &provisioningStream) noexcept;
+	~NetworkManager();
+
+	NetworkManager(const NetworkManager &) = delete;
+	NetworkManager &operator=(const NetworkManager &) = delete;
+	NetworkManager(NetworkManager &&) = delete;
+	NetworkManager &operator=(NetworkManager &&) = delete;
+
 	void initialize(std::uint32_t nowMs) noexcept;
+	void shutdown() noexcept;
 	void update(std::uint32_t nowMs) noexcept;
 	void ingestProvisioning(const std::uint8_t *data, std::size_t length) noexcept;
 	[[nodiscard]] bool provisionWifiProfile(std::uint8_t profileIndex, const char *ssid, const char *passphrase,
@@ -30,6 +43,7 @@ public:
 	void applyCommittedConfiguration(std::uint32_t nowMs) noexcept;
 	[[nodiscard]] ports::NetworkStatusPort statusPort() noexcept;
 	[[nodiscard]] ports::NetworkControlPort controlPort() noexcept;
+	[[nodiscard]] hal::NetworkHal hal() noexcept;
 
 private:
 	static const ports::NetworkStatusSnapshot &statusCallback(void *context) noexcept;
@@ -38,17 +52,17 @@ private:
 	static void applyConfigurationCallback(void *context, std::uint32_t nowMs) noexcept;
 	static bool provisionWifi(const char *ssid, const char *passphrase);
 	[[nodiscard]] bool configureProfile(std::uint8_t index) noexcept;
-	void updateWifiScan() noexcept;
-	void updateIpStatus() noexcept;
 	void beginNextProfile(std::uint32_t nowMs) noexcept;
 	void startRecoveryAp(std::uint32_t nowMs) noexcept;
 	void stopRecoveryAp() noexcept;
 	void transition(ports::NetworkLifecycleState state, std::uint32_t nowMs) noexcept;
 	[[nodiscard]] const domain::NetworkConfiguration &configuration() const noexcept;
 
-	const bsp::BoardDescriptor &board_;
+	const hal::BoardDescriptor &board_;
 	app::ConfigurationService &configurationService_;
 	app::WifiManagementService &wifiManagementService_;
+	WifiAdapter &wifiAdapter_;
+	ports::EthernetAdapterPort ethernetAdapter_;
 	ImprovWiFi improv_;
 	ports::NetworkStatusSnapshot status_{};
 	std::uint32_t attemptStartedAtMs_{0};

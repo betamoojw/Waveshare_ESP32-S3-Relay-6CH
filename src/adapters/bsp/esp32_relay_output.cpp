@@ -12,7 +12,7 @@ namespace
 }
 }
 
-Esp32RelayOutput::Esp32RelayOutput(const BoardDescriptor &descriptor) noexcept
+Esp32RelayOutput::Esp32RelayOutput(const hal::BoardDescriptor &descriptor) noexcept
 	: descriptor_{descriptor}
 {
 }
@@ -29,16 +29,22 @@ RelayOutputResult Esp32RelayOutput::initialize() noexcept
 {
 	initialized_ = false;
 	channelStates_.fill(false);
+	if (!hal::isValid(descriptor_))
+	{
+		return RelayOutputResult::HardwareFailure;
+	}
 
 	const auto inactiveLevel = static_cast<std::uint32_t>(descriptor_.relayInactiveLevel());
-	for (const auto pin : descriptor_.relayPins)
+	for (std::size_t channel = 0; channel < descriptor_.relayCount; ++channel)
 	{
+		const auto pin = descriptor_.relayPin(channel);
 		const auto gpio = toGpioNumber(pin);
 		if (!GPIO_IS_VALID_OUTPUT_GPIO(gpio) || gpio_set_level(gpio, inactiveLevel) != ESP_OK ||
 			gpio_set_direction(gpio, GPIO_MODE_OUTPUT) != ESP_OK || gpio_set_level(gpio, inactiveLevel) != ESP_OK)
 		{
-			for (const auto safePin : descriptor_.relayPins)
+			for (std::size_t safeChannel = 0; safeChannel < descriptor_.relayCount; ++safeChannel)
 			{
+				const auto safePin = descriptor_.relayPin(safeChannel);
 				const auto safeGpio = toGpioNumber(safePin);
 				if (GPIO_IS_VALID_OUTPUT_GPIO(safeGpio))
 				{
@@ -53,28 +59,33 @@ RelayOutputResult Esp32RelayOutput::initialize() noexcept
 	return RelayOutputResult::Applied;
 }
 
-ports::RelayOutputPort Esp32RelayOutput::port() noexcept
+hal::RelayHal Esp32RelayOutput::hal() noexcept
 {
 	return {applyCallback, this};
 }
 
-ports::RelayOutputResult Esp32RelayOutput::applyCallback(void *const context,
+ports::RelayOutputPort Esp32RelayOutput::port() noexcept
+{
+	return hal();
+}
+
+hal::RelayHalResult Esp32RelayOutput::applyCallback(void *const context,
 																	 const domain::RelayChannelId channel,
 																	 const domain::RelayState state) noexcept
 {
 	if (context == nullptr)
 	{
-		return ports::RelayOutputResult::HardwareFailure;
+		return hal::RelayHalResult::HardwareFailure;
 	}
 
 	auto &output = *static_cast<Esp32RelayOutput *>(context);
 	const auto result = output.setChannel(channel.value, state == domain::RelayState::On);
-	return result == RelayOutputResult::Applied ? ports::RelayOutputResult::Applied : ports::RelayOutputResult::HardwareFailure;
+	return result == RelayOutputResult::Applied ? hal::RelayHalResult::Applied : hal::RelayHalResult::HardwareFailure;
 }
 
 RelayOutputResult Esp32RelayOutput::setChannel(const std::size_t channel, const bool enabled) noexcept
 {
-	if (channel >= descriptor_.relayPins.size())
+	if (channel >= descriptor_.relayCount)
 	{
 		return RelayOutputResult::InvalidChannel;
 	}
@@ -93,7 +104,7 @@ RelayOutputResult Esp32RelayOutput::allOff() noexcept
 		return RelayOutputResult::NotInitialized;
 	}
 
-	for (std::size_t channel = 0; channel < descriptor_.relayPins.size(); ++channel)
+	for (std::size_t channel = 0; channel < descriptor_.relayCount; ++channel)
 	{
 		if (writeChannel(channel, false) != RelayOutputResult::Applied)
 		{
@@ -117,7 +128,7 @@ bool Esp32RelayOutput::isInitialized() const noexcept
 RelayOutputResult Esp32RelayOutput::writeChannel(const std::size_t channel, const bool enabled) noexcept
 {
 	const auto level = static_cast<std::uint32_t>(enabled ? descriptor_.relayActiveLevel() : descriptor_.relayInactiveLevel());
-	if (gpio_set_level(toGpioNumber(descriptor_.relayPins[channel]), level) != ESP_OK)
+	if (gpio_set_level(toGpioNumber(descriptor_.relayPin(channel)), level) != ESP_OK)
 	{
 		return RelayOutputResult::HardwareFailure;
 	}

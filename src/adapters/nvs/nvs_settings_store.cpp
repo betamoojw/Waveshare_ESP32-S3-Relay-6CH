@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace switch_actuator::adapters::nvs
 {
@@ -13,20 +14,35 @@ constexpr char settingsNamespace[]{"switch_cfg"};
 constexpr char slotAKey[]{"cfg_a"};
 constexpr char slotBKey[]{"cfg_b"};
 constexpr char activeSlotKey[]{"active"};
+constexpr char bootCountKey[]{"boot_count"};
+constexpr char diagnosticSlotAKey[]{"diag_a"};
+constexpr char diagnosticSlotBKey[]{"diag_b"};
+constexpr char diagnosticActiveSlotKey[]{"diag_active"};
 constexpr std::uint8_t slotA{0};
 constexpr std::uint8_t slotB{1};
 constexpr std::uint8_t noActiveSlot{0xFF};
 constexpr std::uint32_t recordMagic{0x53414346};
 constexpr std::size_t recordHeaderSize{16};
 constexpr std::uint16_t legacyConfigurationSchemaVersion{1};
+constexpr std::uint16_t previousConfigurationSchemaVersion{3};
 constexpr std::size_t legacyConfigurationPayloadSize{159};
-constexpr std::size_t configurationPayloadSize{633};
+constexpr std::size_t previousConfigurationPayloadSize{633};
+constexpr std::size_t configurationPayloadSize{672};
 constexpr std::size_t legacyConfigurationRecordSize{recordHeaderSize + legacyConfigurationPayloadSize};
+constexpr std::size_t previousConfigurationRecordSize{recordHeaderSize + previousConfigurationPayloadSize};
 constexpr std::size_t configurationRecordSize{recordHeaderSize + configurationPayloadSize};
+constexpr std::uint32_t diagnosticRecordMagic{0x53414443};
+constexpr std::uint16_t diagnosticRecordVersion{1};
+constexpr std::size_t diagnosticCounterCount{9};
+constexpr std::size_t diagnosticPayloadSize{diagnosticCounterCount * sizeof(std::uint32_t)};
+constexpr std::size_t diagnosticRecordSize{recordHeaderSize + diagnosticPayloadSize};
 
 using Payload = std::array<std::uint8_t, configurationPayloadSize>;
+using PreviousPayload = std::array<std::uint8_t, previousConfigurationPayloadSize>;
 using LegacyPayload = std::array<std::uint8_t, legacyConfigurationPayloadSize>;
 using Record = std::array<std::uint8_t, configurationRecordSize>;
+using DiagnosticPayload = std::array<std::uint8_t, diagnosticPayloadSize>;
+using DiagnosticRecord = std::array<std::uint8_t, diagnosticRecordSize>;
 
 enum class SlotState : std::uint8_t
 {
@@ -41,6 +57,14 @@ struct SlotRecord final
 	domain::Configuration configuration{};
 	Record encoded{};
 	std::size_t encodedLength{0};
+};
+
+struct DiagnosticSlotRecord final
+{
+	SlotState state{SlotState::Missing};
+	domain::PersistentDiagnosticCounters counters{};
+	std::uint32_t generation{0};
+	DiagnosticRecord encoded{};
 };
 
 class ByteWriter final
@@ -175,10 +199,13 @@ template <std::size_t Size>
 	ByteWriter writer{payload};
 	writer.writeU16(configuration.schemaVersion);
 	writer.writeU32(configuration.generation);
+	writer.writeArray(configuration.productId.value);
 	writer.writeArray(configuration.boardModel);
 	writer.writeArray(configuration.hardwareRevision);
 	writer.writeArray(configuration.deviceSerial);
 	writer.writeArray(configuration.deviceUuid);
+	writer.writeArray(configuration.manufacturingDate.iso8601);
+	writer.writeU32(configuration.manufacturingBatch);
 	writer.writeU8(configuration.modbus.unitId);
 	writer.writeU32(configuration.modbus.baudRate);
 	writer.writeU8(static_cast<std::uint8_t>(configuration.modbus.parity));
@@ -237,16 +264,33 @@ template <std::size_t Size>
 	return writer.complete();
 }
 
-[[nodiscard]] bool decodePayload(const Payload &payload, domain::Configuration &configuration) noexcept
+template <std::size_t PayloadSize>
+[[nodiscard]] bool decodePayload(const std::array<std::uint8_t, PayloadSize> &payload,
+	domain::Configuration &configuration,
+	const bool hasProductionIdentity) noexcept
 {
 	ByteReader reader{payload};
 	configuration = {};
-	configuration.schemaVersion = reader.readU16();
+	const auto storedSchemaVersion = reader.readU16();
+	if (storedSchemaVersion != (hasProductionIdentity ? domain::currentConfigurationSchemaVersion : previousConfigurationSchemaVersion))
+	{
+		return false;
+	}
+	configuration.schemaVersion = domain::currentConfigurationSchemaVersion;
 	configuration.generation = reader.readU32();
+	if (hasProductionIdentity)
+	{
+		reader.readArray(configuration.productId.value);
+	}
 	reader.readArray(configuration.boardModel);
 	reader.readArray(configuration.hardwareRevision);
 	reader.readArray(configuration.deviceSerial);
 	reader.readArray(configuration.deviceUuid);
+	if (hasProductionIdentity)
+	{
+		reader.readArray(configuration.manufacturingDate.iso8601);
+		configuration.manufacturingBatch = reader.readU32();
+	}
 	configuration.modbus.unitId = reader.readU8();
 	configuration.modbus.baudRate = reader.readU32();
 	configuration.modbus.parity = static_cast<domain::SerialParity>(reader.readU8());
@@ -446,7 +490,14 @@ template <std::size_t Size>
 	{
 		Payload payload{};
 		std::copy_n(record.begin() + recordHeaderSize, payload.size(), payload.begin());
-		return crc32(payload) == readU32(record, 12) && decodePayload(payload, configuration) &&
+		return crc32(payload) == readU32(record, 12) && decodePayload(payload, configuration, true) &&
+			configuration.generation == readU32(record, 8);
+	}
+	if (schemaVersion == previousConfigurationSchemaVersion && payloadLength == previousConfigurationPayloadSize)
+	{
+		PreviousPayload payload{};
+		std::copy_n(record.begin() + recordHeaderSize, payload.size(), payload.begin());
+		return crc32(payload) == readU32(record, 12) && decodePayload(payload, configuration, false) &&
 			configuration.generation == readU32(record, 8);
 	}
 	if (schemaVersion == legacyConfigurationSchemaVersion && payloadLength == legacyConfigurationPayloadSize)
@@ -473,7 +524,8 @@ template <std::size_t Size>
 	{
 		return result;
 	}
-	if ((storedLength != legacyConfigurationRecordSize && storedLength != configurationRecordSize) ||
+	if ((storedLength != legacyConfigurationRecordSize && storedLength != previousConfigurationRecordSize &&
+			storedLength != configurationRecordSize) ||
 		preferences.getBytes(key, result.encoded.data(), storedLength) != storedLength)
 	{
 		result.state = SlotState::Corrupt;
@@ -483,6 +535,151 @@ template <std::size_t Size>
 	result.encodedLength = storedLength;
 	result.state = decodeRecord(result.encoded, storedLength, result.configuration) ? SlotState::Valid : SlotState::Corrupt;
 	return result;
+}
+
+void writeDiagnosticU32(DiagnosticRecord &record, const std::size_t offset, const std::uint32_t value) noexcept
+{
+	for (std::size_t index = 0; index < sizeof(value); ++index)
+	{
+		record[offset + index] = static_cast<std::uint8_t>(value >> (index * 8U));
+	}
+}
+
+[[nodiscard]] std::uint32_t readDiagnosticU32(const DiagnosticRecord &record, const std::size_t offset) noexcept
+{
+	std::uint32_t value{0};
+	for (std::size_t index = 0; index < sizeof(value); ++index)
+	{
+		value |= static_cast<std::uint32_t>(record[offset + index]) << (index * 8U);
+	}
+	return value;
+}
+
+[[nodiscard]] bool diagnosticCountersEqual(const domain::PersistentDiagnosticCounters &left,
+	const domain::PersistentDiagnosticCounters &right) noexcept
+{
+	return left.bootCount == right.bootCount && left.watchdogCount == right.watchdogCount &&
+		left.brownoutCount == right.brownoutCount && left.configErrorCount == right.configErrorCount &&
+		left.otaFailureCount == right.otaFailureCount && left.networkFailureCount == right.networkFailureCount &&
+		left.modbusErrorCount == right.modbusErrorCount && left.knxErrorCount == right.knxErrorCount &&
+		left.storageErrorCount == right.storageErrorCount;
+}
+
+[[nodiscard]] DiagnosticRecord encodeDiagnosticCounters(const domain::PersistentDiagnosticCounters &counters,
+	const std::uint32_t generation) noexcept
+{
+	DiagnosticPayload payload{};
+	DiagnosticRecord payloadWriter{};
+	writeDiagnosticU32(payloadWriter, 0, counters.bootCount);
+	writeDiagnosticU32(payloadWriter, 4, counters.watchdogCount);
+	writeDiagnosticU32(payloadWriter, 8, counters.brownoutCount);
+	writeDiagnosticU32(payloadWriter, 12, counters.configErrorCount);
+	writeDiagnosticU32(payloadWriter, 16, counters.otaFailureCount);
+	writeDiagnosticU32(payloadWriter, 20, counters.networkFailureCount);
+	writeDiagnosticU32(payloadWriter, 24, counters.modbusErrorCount);
+	writeDiagnosticU32(payloadWriter, 28, counters.knxErrorCount);
+	writeDiagnosticU32(payloadWriter, 32, counters.storageErrorCount);
+	std::copy_n(payloadWriter.begin(), payload.size(), payload.begin());
+
+	DiagnosticRecord record{};
+	writeDiagnosticU32(record, 0, diagnosticRecordMagic);
+	record[4] = static_cast<std::uint8_t>(diagnosticRecordVersion);
+	record[5] = static_cast<std::uint8_t>(diagnosticRecordVersion >> 8U);
+	record[6] = static_cast<std::uint8_t>(diagnosticPayloadSize);
+	record[7] = static_cast<std::uint8_t>(diagnosticPayloadSize >> 8U);
+	writeDiagnosticU32(record, 8, generation);
+	writeDiagnosticU32(record, 12, crc32(payload));
+	std::copy(payload.begin(), payload.end(), record.begin() + recordHeaderSize);
+	return record;
+}
+
+[[nodiscard]] bool decodeDiagnosticCounters(const DiagnosticRecord &record,
+	domain::PersistentDiagnosticCounters &counters,
+	std::uint32_t &generation) noexcept
+{
+	const auto version = static_cast<std::uint16_t>(record[4] | static_cast<std::uint16_t>(record[5]) << 8U);
+	const auto payloadLength = static_cast<std::uint16_t>(record[6] | static_cast<std::uint16_t>(record[7]) << 8U);
+	if (readDiagnosticU32(record, 0) != diagnosticRecordMagic || version != diagnosticRecordVersion ||
+		payloadLength != diagnosticPayloadSize)
+	{
+		return false;
+	}
+	DiagnosticPayload payload{};
+	std::copy(record.begin() + recordHeaderSize, record.end(), payload.begin());
+	if (crc32(payload) != readDiagnosticU32(record, 12))
+	{
+		return false;
+	}
+	counters.bootCount = readDiagnosticU32(record, 16);
+	counters.watchdogCount = readDiagnosticU32(record, 20);
+	counters.brownoutCount = readDiagnosticU32(record, 24);
+	counters.configErrorCount = readDiagnosticU32(record, 28);
+	counters.otaFailureCount = readDiagnosticU32(record, 32);
+	counters.networkFailureCount = readDiagnosticU32(record, 36);
+	counters.modbusErrorCount = readDiagnosticU32(record, 40);
+	counters.knxErrorCount = readDiagnosticU32(record, 44);
+	counters.storageErrorCount = readDiagnosticU32(record, 48);
+	generation = readDiagnosticU32(record, 8);
+	return true;
+}
+
+[[nodiscard]] const char *diagnosticSlotKey(const std::uint8_t slot) noexcept
+{
+	return slot == slotA ? diagnosticSlotAKey : diagnosticSlotBKey;
+}
+
+[[nodiscard]] DiagnosticSlotRecord readDiagnosticSlot(Preferences &preferences, const std::uint8_t slot) noexcept
+{
+	DiagnosticSlotRecord result{};
+	const auto *key = diagnosticSlotKey(slot);
+	const auto storedLength = preferences.getBytesLength(key);
+	if (storedLength == 0) return result;
+	if (storedLength != result.encoded.size() ||
+		preferences.getBytes(key, result.encoded.data(), result.encoded.size()) != result.encoded.size())
+	{
+		result.state = SlotState::Corrupt;
+		return result;
+	}
+	result.state = decodeDiagnosticCounters(result.encoded, result.counters, result.generation) ?
+		SlotState::Valid : SlotState::Corrupt;
+	return result;
+}
+
+[[nodiscard]] bool persistDiagnosticCounters(Preferences &preferences,
+	const domain::PersistentDiagnosticCounters &counters) noexcept
+{
+	const auto first = readDiagnosticSlot(preferences, slotA);
+	const auto second = readDiagnosticSlot(preferences, slotB);
+	const auto marker = preferences.getUChar(diagnosticActiveSlotKey, noActiveSlot);
+	std::uint8_t activeSlot{noActiveSlot};
+	std::uint32_t generation{0};
+	if (first.state == SlotState::Valid && second.state == SlotState::Valid)
+	{
+		activeSlot = first.generation == second.generation ? (marker == slotB ? slotB : slotA) :
+			(second.generation > first.generation ? slotB : slotA);
+		generation = std::max(first.generation, second.generation);
+	}
+	else if (first.state == SlotState::Valid)
+	{
+		activeSlot = slotA;
+		generation = first.generation;
+	}
+	else if (second.state == SlotState::Valid)
+	{
+		activeSlot = slotB;
+		generation = second.generation;
+	}
+	const auto nextGeneration = generation == std::numeric_limits<std::uint32_t>::max() ? generation : generation + 1U;
+	const auto targetSlot = activeSlot == slotA ? slotB : slotA;
+	const auto encoded = encodeDiagnosticCounters(counters, nextGeneration);
+	if (preferences.putBytes(diagnosticSlotKey(targetSlot), encoded.data(), encoded.size()) != encoded.size()) return false;
+	const auto verified = readDiagnosticSlot(preferences, targetSlot);
+	if (verified.state != SlotState::Valid || verified.generation != nextGeneration ||
+		!diagnosticCountersEqual(verified.counters, counters))
+	{
+		return false;
+	}
+	return preferences.putUChar(diagnosticActiveSlotKey, targetSlot) == sizeof(targetSlot);
 }
 }
 
@@ -503,6 +700,54 @@ NvsInitializeResult NvsSettingsStore::initialize() noexcept
 
 	initialized_ = preferences_.begin(settingsNamespace, false);
 	return initialized_ ? NvsInitializeResult::Initialized : NvsInitializeResult::OpenFailure;
+}
+
+DiagnosticCountersBootResult NvsSettingsStore::beginDiagnosticCounters(const domain::ResetCategory resetReason) noexcept
+{
+	DiagnosticCountersBootResult result{};
+	const auto increment = [](std::uint32_t &counter) noexcept {
+		if (counter != std::numeric_limits<std::uint32_t>::max()) ++counter;
+	};
+	if (!initialized_)
+	{
+		increment(result.counters.bootCount);
+		if (resetReason == domain::ResetCategory::Watchdog) increment(result.counters.watchdogCount);
+		if (resetReason == domain::ResetCategory::Brownout) increment(result.counters.brownoutCount);
+		return result;
+	}
+
+	const auto first = readDiagnosticSlot(preferences_, slotA);
+	const auto second = readDiagnosticSlot(preferences_, slotB);
+	if (first.state == SlotState::Valid && second.state == SlotState::Valid)
+	{
+		const auto marker = preferences_.getUChar(diagnosticActiveSlotKey, noActiveSlot);
+		result.counters = first.generation == second.generation ?
+			(marker == slotB ? second.counters : first.counters) :
+			(second.generation > first.generation ? second.counters : first.counters);
+	}
+	else if (first.state == SlotState::Valid || second.state == SlotState::Valid)
+	{
+		result.counters = first.state == SlotState::Valid ? first.counters : second.counters;
+	}
+	else
+	{
+		result.counters.bootCount = preferences_.getUInt(bootCountKey, 0);
+	}
+	if (first.state == SlotState::Corrupt || second.state == SlotState::Corrupt)
+	{
+		increment(result.counters.storageErrorCount);
+	}
+	increment(result.counters.bootCount);
+	if (resetReason == domain::ResetCategory::Watchdog) increment(result.counters.watchdogCount);
+	if (resetReason == domain::ResetCategory::Brownout) increment(result.counters.brownoutCount);
+	result.persisted = persistDiagnosticCounters(preferences_, result.counters);
+	if (result.persisted && preferences_.isKey(bootCountKey)) static_cast<void>(preferences_.remove(bootCountKey));
+	return result;
+}
+
+bool NvsSettingsStore::saveDiagnosticCounters(const domain::PersistentDiagnosticCounters &counters) noexcept
+{
+	return initialized_ && persistDiagnosticCounters(preferences_, counters);
 }
 
 ports::SettingsStore NvsSettingsStore::port() noexcept
@@ -616,7 +861,9 @@ ports::SettingsEraseResult NvsSettingsStore::erase() noexcept
 	{
 		return ports::SettingsEraseResult::IoFailure;
 	}
-	if (preferences_.isKey(slotAKey) || preferences_.isKey(slotBKey) || preferences_.isKey(activeSlotKey))
+	if (preferences_.isKey(slotAKey) || preferences_.isKey(slotBKey) || preferences_.isKey(activeSlotKey) ||
+		preferences_.isKey(diagnosticSlotAKey) || preferences_.isKey(diagnosticSlotBKey) ||
+		preferences_.isKey(diagnosticActiveSlotKey) || preferences_.isKey(bootCountKey))
 	{
 		return ports::SettingsEraseResult::VerificationFailure;
 	}

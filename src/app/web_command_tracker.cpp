@@ -13,10 +13,11 @@ WebCommandBeginResult WebCommandTracker::begin(const std::uint32_t sessionId,
 	const std::uint32_t nowMs,
 	WebTrackedCommand &command) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	command = {};
 	if (sessionId == 0 || correlationId == 0 || idempotencyKey.empty() || idempotencyKey.size() > 128U)
 		return WebCommandBeginResult::InvalidKey;
-	expire(nowMs);
+	expireUnlocked(nowMs);
 	const auto keyHash = hash(idempotencyKey);
 	const auto normalizedRequestHash = requestHash(channel, action, expectedResourceSequence);
 	const auto existing = std::find_if(commands_.begin(), commands_.end(), [sessionId, keyHash](const auto &candidate) {
@@ -46,6 +47,7 @@ bool WebCommandTracker::complete(const std::uint32_t correlationId,
 	const std::uint32_t nowMs,
 	WebTrackedCommand &command) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	const auto tracked = std::find_if(commands_.begin(), commands_.end(), [correlationId](const auto &candidate) {
 		return candidate.active && candidate.correlationId == correlationId;
 	});
@@ -66,6 +68,7 @@ bool WebCommandTracker::reject(const std::uint32_t correlationId,
 	const std::uint32_t nowMs,
 	WebTrackedCommand &command) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	const auto tracked = std::find_if(commands_.begin(), commands_.end(), [correlationId](const auto &candidate) {
 		return candidate.active && candidate.correlationId == correlationId;
 	});
@@ -81,6 +84,7 @@ bool WebCommandTracker::findByCorrelation(const std::uint32_t sessionId,
 	const std::uint32_t correlationId,
 	WebTrackedCommand &command) const noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
 	const auto tracked = std::find_if(commands_.begin(), commands_.end(), [sessionId, correlationId](const auto &candidate) {
 		return candidate.active && candidate.sessionId == sessionId && candidate.correlationId == correlationId;
 	});
@@ -91,13 +95,23 @@ bool WebCommandTracker::findByCorrelation(const std::uint32_t sessionId,
 
 void WebCommandTracker::expire(const std::uint32_t nowMs) noexcept
 {
+	const std::lock_guard<std::mutex> lock{mutex_};
+	expireUnlocked(nowMs);
+}
+
+void WebCommandTracker::expireUnlocked(const std::uint32_t nowMs) noexcept
+{
 	for (auto &command : commands_)
 	{
 		if (command.active && command.completedAtMs != 0 && nowMs - command.completedAtMs >= retentionMs) command = {};
 	}
 }
 
-void WebCommandTracker::clear() noexcept { commands_.fill({}); }
+void WebCommandTracker::clear() noexcept
+{
+	const std::lock_guard<std::mutex> lock{mutex_};
+	commands_.fill({});
+}
 
 std::uint32_t WebCommandTracker::hash(const std::string_view value) noexcept
 {

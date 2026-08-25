@@ -53,7 +53,7 @@ Confirmed reusable components are:
 | Configuration | `src/app/configuration_service.*`, `src/domain/configuration.*` | Reuse validation, staging, commit, discard, generation, persistence results, and restart-required decisions. NVS remains authoritative. |
 | Persistent storage | `src/adapters/nvs/nvs_settings_store.*` | Continue using dual-slot generation-based configuration persistence. Credentials, JWT signing material, revocation generations, and certificate private keys require separate protected NVS records, not `domain::Configuration` or LittleFS JSON. |
 | Deployment defaults | `src/adapters/filesystem/littlefs_configuration_source.*` | Keep `/config/` private. The existing bundle recovery order and 8192-byte per-section limit remain unchanged. |
-| Static asset location | `design/filesystem-architecture.md`, `src/adapters/web/README.md` | Serve only an allowlist rooted at LittleFS `/www/`; never expose arbitrary paths, `/config/`, or backups. Provide a compiled recovery page when LittleFS is unavailable. |
+| Static asset location | `docs/architecture/filesystem.md`, `src/adapters/web/README.md` | Serve only an allowlist rooted at LittleFS `/www/`; never expose arbitrary paths, `/config/`, or backups. Provide a compiled recovery page when LittleFS is unavailable. |
 | Network status | `src/adapters/network/network_manager.*`, `src/ports/network_status_port.h` | Bounded asynchronous scanning, IPv4 address, gateway, DNS, profile index, online/AP flags, and RSSI are implemented. Add disconnect reason/reconnect count and an application-facing redacted profile mutation facade. |
 | Board capability | `src/adapters/bsp/board_descriptor.h` | Current board has six relays and Wi-Fi, with Ethernet explicitly unsupported. The API must still report capabilities rather than making the UI assume six channels. |
 | KNX | `src/adapters/knx/knx_adapter.*` | Current KNX/IP routing supports baseline switch/status/fault and central operations. Scenes, timers, lock/forced operation, counters, secure mode, and programming mode are not implemented. |
@@ -541,7 +541,7 @@ record are defined in `design/web-hardware-load-gate.md`.
 2. Add a deterministic packaging script under `scripts/` that cleans and copies only manifest-allowlisted production assets into `data/www/`.
 3. Precompress eligible text assets as Brotli and gzip. Keep the original only when needed for clients lacking compression support. Record content type, encoding, byte length, hash, UI version, and minimum API version in a generated manifest.
 4. Extend `extra_script.py` to run packaging before `buildfs`/production firmware packaging or fail when the checked manifest is stale. Do not run `npm install` implicitly inside PlatformIO.
-5. Continue using `pio run -e ws_esp32-s3-relay-6ch -t buildfs` and `uploadfs` for LittleFS deployment. Add CI that builds both firmware and filesystem and reports partition utilization.
+5. Continue using `pio run -e development -t buildfs` and `uploadfs` for LittleFS deployment. Add CI that builds both firmware and filesystem and reports partition utilization.
 6. Pin and record the generated 8 MiB partition layout containing `otadata`, `app0`, and `app1` at `0x330000` each. Any partition change requires OTA-slot, rollback, migration, and field-upgrade analysis.
 7. Embed only a tiny recovery HTML response and compatibility error in firmware. The full application remains in LittleFS.
 
@@ -647,7 +647,7 @@ Phase status at the verified baseline:
 
 **Acceptance criteria:** Initial UI meets the documented bundle budgets; two test clients do not violate relay/fieldbus/watchdog intervals; partition capacity is known; all required ADRs are approved.
 
-**Validation:** `npm ci`, `npm run typecheck`, `npm run build`, bundle report, `pio run -e ws_esp32-s3-relay-6ch`, `pio run -e ws_esp32-s3-relay-6ch -t buildfs`, hardware timing/heap capture.
+**Validation:** `npm ci`, `npm run typecheck`, `npm run build`, bundle report, `pio run -e development`, `pio run -e development -t buildfs`, hardware timing/heap capture.
 
 **Risk/rollback:** If React or the HTTP library misses budget, stop and approve the smaller-stack/transport ADR. No production firmware behavior changes in this phase.
 

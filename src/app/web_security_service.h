@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <string_view>
 
 namespace switch_actuator::app
@@ -93,6 +94,7 @@ public:
 	[[nodiscard]] WebUserManagementResult provisionInitialAdministrator(std::string_view username,
 		std::string_view password,
 		std::string_view hostName) noexcept;
+	[[nodiscard]] ports::WebSecurityStoreResult eraseUsersPreservingIdentity() noexcept;
 	[[nodiscard]] ports::WebSecurityStoreResult erase() noexcept;
 	[[nodiscard]] ports::WebSecurityPort port() noexcept;
 	[[nodiscard]] bool isInitialized() const noexcept;
@@ -124,7 +126,7 @@ private:
 
 	[[nodiscard]] static std::string_view certificateHandler(void *context) noexcept;
 	[[nodiscard]] static std::string_view privateKeyHandler(void *context) noexcept;
-	[[nodiscard]] static bool authorizeHandler(void *context,
+	[[nodiscard]] static ports::WebAuthorizationResult authorizeHandler(void *context,
 		std::string_view sessionToken,
 		std::string_view origin,
 		std::string_view host,
@@ -132,7 +134,7 @@ private:
 		ports::WebPermission permission,
 		bool mutation,
 		ports::WebAuthorization &authorization) noexcept;
-	[[nodiscard]] bool authorize(std::string_view sessionToken,
+	[[nodiscard]] ports::WebAuthorizationResult authorize(std::string_view sessionToken,
 		std::string_view origin,
 		std::string_view host,
 		std::string_view csrfToken,
@@ -151,6 +153,7 @@ private:
 		std::size_t inputSize,
 		char *output,
 		std::size_t outputCapacity) noexcept;
+	[[nodiscard]] static bool securityIdentityIsValid(const ports::WebSecurityRecord &record) noexcept;
 	[[nodiscard]] static bool recordIsValid(const ports::WebSecurityRecord &record) noexcept;
 	void fillView(const Session &session, std::uint32_t nowMs, WebSessionView &view) const noexcept;
 	void revokeUserSessions(std::uint32_t userId) noexcept;
@@ -158,6 +161,7 @@ private:
 	ports::WebSecurityStore store_;
 	ports::WebCryptoPort crypto_;
 	ports::ClockPort clock_;
+	mutable std::mutex mutex_{};
 	ports::WebSecurityRecord record_{};
 	std::array<Session, ports::webSessionCapacity> sessions_{};
 	std::array<char, 192> expectedOrigin_{};

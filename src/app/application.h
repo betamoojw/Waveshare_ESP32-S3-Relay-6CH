@@ -12,9 +12,12 @@
 #include "relay_command_service.h"
 #include "relay_timer_service.h"
 #include "scene_service.h"
+#include "service_mode_service.h"
 #include "switching_policy_service.h"
 #include "../adapters/bsp/esp32_relay_output.h"
-#include "../adapters/bsp/waveshare_esp32s3_relay6ch.h"
+#include "../adapters/bsp/esp32_button_hal.h"
+#include "../adapters/bsp/esp32_indicator_hal.h"
+#include "../hal/Board.h"
 #include "../adapters/button/button_adapter.h"
 #include "../adapters/cli/cli_adapter.h"
 #include "../adapters/configuration/json_configuration_source.h"
@@ -25,6 +28,8 @@
 #include "../adapters/modbus/modbus_application_gateway.h"
 #include "../adapters/modbus/modbus_configuration_gateway.h"
 #include "../adapters/network/network_manager.h"
+#include "../adapters/network/null_ethernet_adapter.h"
+#include "../adapters/network/wifi_adapter.h"
 #include "../adapters/nvs/nvs_settings_store.h"
 #include "../adapters/nvs/nvs_web_security_store.h"
 #include "../adapters/watchdog/esp32_task_watchdog.h"
@@ -48,7 +53,9 @@ enum class ApplicationInitializeResult : std::uint8_t
 	ServiceFailure,
 	ButtonFailure,
 	CliFailure,
-	WatchdogFailure
+	WatchdogFailure,
+	SecurityPolicyFailure,
+	UnsupportedBoard
 };
 
 class Application final
@@ -67,18 +74,22 @@ private:
 	static void routeProvisioningBytes(const std::uint8_t *data, std::size_t length, void *context) noexcept;
 	[[nodiscard]] static bool extendModbusSnapshot(void *context,
 															 adapters::modbus::RegisterMapSnapshot &snapshot) noexcept;
+	[[nodiscard]] static adapters::modbus::WriteBatchResult handleModbusNonRelayWrite(
+		void *context, const adapters::modbus::HoldingWriteBatch &batch) noexcept;
 	[[nodiscard]] bool onButtonEvent(const adapters::button::ButtonEvent &event) noexcept;
 	[[nodiscard]] bool performFactoryReset(std::uint32_t nowMs) noexcept;
 	[[nodiscard]] static domain::ResetCategory resetCategory() noexcept;
-	[[nodiscard]] bool applyRestorePlan(std::uint32_t nowMs) noexcept;
+	[[nodiscard]] bool applyRestorePlan(domain::ResetCategory resetCategory, std::uint32_t nowMs) noexcept;
 	void handleWatchdogFailure(std::uint32_t nowMs) noexcept;
 	void processRelayCommand(std::uint32_t nowMs) noexcept;
 	void processWebRequest(std::uint32_t nowMs) noexcept;
 	void publishWebStateEvents(std::uint32_t nowMs) noexcept;
 	void updateDiagnostics(std::uint32_t nowMs) noexcept;
+	void flushDiagnosticCounters(std::uint32_t nowMs, bool force) noexcept;
 
 	DiagnosticsService diagnostics_{};
 	LifecycleSupervisor lifecycle_;
+	ServiceModeService serviceMode_{};
 	adapters::bsp::Esp32RelayOutput relayOutput_;
 	CommandArbiter commandArbiter_{};
 	RelayCommandService relayService_;
@@ -93,18 +104,25 @@ private:
 	adapters::filesystem::LittleFsConfigurationSource defaultConfigurationSource_;
 	ConfigurationService configurationService_;
 	WifiManagementService wifiManagementService_{configurationService_};
+	adapters::network::WifiAdapter wifiAdapter_{};
+	adapters::network::NullEthernetAdapter ethernetAdapter_{};
 	adapters::nvs::NvsWebSecurityStore webSecurityStore_{};
 	adapters::web::Esp32WebCrypto webCrypto_{};
 	WebSecurityService webSecurityService_{webSecurityStore_.port(), webCrypto_.port(),
 		ports::ClockPort{monotonicMilliseconds, this}};
-	adapters::network::NetworkManager network_{adapters::bsp::waveshareEsp32S3Relay6Ch,
-		configurationService_, wifiManagementService_, Serial};
+	adapters::network::NetworkManager network_{hal::board(),
+		configurationService_, wifiManagementService_, wifiAdapter_, ethernetAdapter_.port(), Serial};
+	hal::NetworkHal networkHal_{};
+	adapters::bsp::Esp32RgbLedHal rgbLedHardware_;
+	adapters::bsp::Esp32BuzzerHal buzzerHardware_;
 	adapters::indicators::StatusIndicator statusIndicator_;
+	adapters::bsp::Esp32ButtonHal buttonHardware_;
 	adapters::button::ButtonAdapter button_;
 	adapters::knx::KnxAdapter knx_;
 	adapters::modbus::ModbusConfigurationGateway modbusConfigurationGateway_;
 	adapters::modbus::ModbusApplicationGateway modbusApplicationGateway_;
 	adapters::modbus::Esp32ModbusSerialTransport modbusSerialTransport_;
+	hal::Rs485Hal rs485Hal_{};
 	adapters::modbus::ModbusRtuAdapter modbusRtu_;
 	adapters::cli::CliAdapter cli_;
 	adapters::watchdog::Esp32TaskWatchdog watchdog_{};
@@ -114,8 +132,8 @@ private:
 		&configurationService_,
 		&wifiManagementService_,
 		&webEventJournal_,
-		network_.statusPort(),
-		network_.controlPort(),
+		networkHal_.status,
+		networkHal_.control,
 		modbusRtu_.controlPort(),
 		webSecurityService_.port(),
 		&webSecurityService_,
@@ -128,6 +146,7 @@ private:
 	std::uint32_t lastCliPollAtMs_{0};
 	std::uint32_t lastIndicatorUpdateAtMs_{0};
 	std::uint32_t lastDiagnosticsUpdateAtMs_{0};
+	std::uint32_t lastDiagnosticCounterFlushAtMs_{0};
 	std::uint32_t lastPublishedNetworkSequence_{0};
 	std::uint32_t lastPublishedWifiScanSequence_{0};
 	std::uint32_t lastPublishedConfigurationGeneration_{0};

@@ -23,8 +23,16 @@ struct WebAuthorization final
 	std::uint32_t permissions{0};
 };
 
+enum class WebAuthorizationResult : std::uint8_t
+{
+	Authorized,
+	Unauthenticated,
+	Forbidden,
+	RateLimited
+};
+
 using WebSecurityTextHandler = std::string_view (*)(void *context) noexcept;
-using WebAuthorizeHandler = bool (*)(void *context,
+using WebAuthorizeHandler = WebAuthorizationResult (*)(void *context,
 	std::string_view sessionToken,
 	std::string_view origin,
 	std::string_view host,
@@ -54,7 +62,7 @@ public:
 	{
 		return privateKeyHandler_ != nullptr ? privateKeyHandler_(context_) : std::string_view{};
 	}
-	[[nodiscard]] bool authorize(std::string_view sessionToken,
+	[[nodiscard]] WebAuthorizationResult authorize(std::string_view sessionToken,
 		std::string_view origin,
 		std::string_view host,
 		std::string_view csrfToken,
@@ -62,8 +70,9 @@ public:
 		bool mutation,
 		WebAuthorization &authorization) const noexcept
 	{
-		return authorizeHandler_ != nullptr && authorizeHandler_(context_, sessionToken, origin, host, csrfToken,
-			permission, mutation, authorization);
+		return authorizeHandler_ != nullptr
+			? authorizeHandler_(context_, sessionToken, origin, host, csrfToken, permission, mutation, authorization)
+			: WebAuthorizationResult::Unauthenticated;
 	}
 	[[nodiscard]] constexpr bool isValid() const noexcept
 	{

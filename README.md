@@ -1,44 +1,34 @@
-# ESP32 project template
+# Switch Actuator
 
-## Refer to this project: https://github.com/Chinmay-ESP/SE-S3-RELAY-6CH
+Switch Actuator is production-oriented ESP32-S3 firmware for deterministic relay control through KNX/IP, Modbus RTU, local service tools, and an authenticated web interface.
 
-## Modbus RTU Protocol V1
+## Product Documentation
 
-### Function Code Introduction
-Function Code (hex) ------------- Description	-------------------------- Note
-0x03	                            Read holding register	                 
-0x06	                            Write single register	                 
-0x10                              Write Multiple registers
+The canonical product documentation is organized by architecture, protocols,
+product lifecycle, manufacturing, and release responsibility in the
+[Product Documentation Index](docs/README.md).
 
-### Register Address Introduction
-Address (Decimal) -- Address storage content -------------------------- Permission ------------- Modbus Function Code
-                     0x0000: relay off
-32 ~ 37              0x0001: relay on                                   Read/Write               0x03, 0x06, 0x10
-                     0x0002: relay toggle
+## Modbus RTU Protocol
 
-48                   0x~~FF: digital led red color                      Read/Write               0x03, 0x06, 0x10
-49                   0x~~FF: digital led green color                    Read/Write               0x03, 0x06, 0x10
-50                   0x~~FF: digital led blue color                     Read/Write               0x03, 0x06, 0x10
-51                   0x~~FF: digital led brightness                     Read/Write               0x03, 0x06, 0x10
+The public, frozen product interface is [Modbus RTU](docs/protocols/modbus.md).
+It defines zero-based register addresses, data types, access rights, defaults,
+ranges, persistence, side effects, reset behavior, serial settings, supported
+function codes, exceptions, and broadcast behavior.
 
-56                   0x~~~7: buzzer tone                                Read/Write               0x03, 0x06, 0x10
+## KNX/IP Application
 
-128                 UART Parameter
-                    The high 8 bits indicate the parity mode: 0x00~0x02 Read/Write               0x03, 0x06
-                    The low 8 bits indicate the baudrate : 0x00~0x07    Read/Write
+The implemented KNX/IP product contract is [KNX/IP](docs/protocols/knx-ip.md).
+It freezes parameters, communication-object numbers, group-address rules,
+DPTs, startup/status behavior, central functions, scene reservations,
+diagnostics, and the ETS/product-data delivery strategy.
 
-130                 Device Address
-                    Directly store Modbus address                       Read/Write               0x03, 0x06
-                    Device address: 0x0001-0x00FF
+## Compatibility Versions
 
-132                 Software Version                                    Read/Write               0x03
-                    Converting to decimal and then shifting the decimal 
-                    point two places to the left will represent the 
-                    software version 0x0064 = 100 = V1.00
-
-## Description
-
-This is a project...
+The current compatibility set is `HW-A01`, `FW-1.4.0`, `CFG-4`, `API-v1`,
+`MODBUS-v1`, `KNX-APP-v1`, and `FS-v1`. Firmware exposes the complete set
+through the serial `version` command and authenticated web capabilities. See
+[Version Compatibility Contract](docs/product/compatibility.md) for sources
+of truth and independent bump rules.
 
 ## Requirements
 
@@ -61,11 +51,15 @@ If you want to test the build on all merge w/o creating a tag then the `build` w
 
 Data-driven deployment configuration lives in the seven JSON files under [data/config](data/config). PlatformIO packages that directory as LittleFS. [config/default_configuration.json](config/default_configuration.json) remains an embedded monolithic recovery fallback, so firmware can boot safely when LittleFS is blank or unavailable.
 
-At boot, precedence is valid NVS, the complete `/config/*.json` bundle, the complete `/config/.backup/*.json` bundle, embedded JSON, then safe domain defaults. LittleFS mount failure does not trigger automatic formatting: firmware uses the embedded fallback, reports a filesystem fault, and remains degraded. NVS corruption or I/O failure likewise remains a degraded-state fault even when a JSON fallback succeeds. See [design/filesystem-architecture.md](design/filesystem-architecture.md) for section ownership, recovery, and security rules.
+At boot, precedence is valid NVS, the complete `/config/*.json` bundle, the complete `/config/.backup/*.json` bundle, embedded JSON, then safe domain defaults. LittleFS mount failure does not trigger automatic formatting: firmware uses the embedded fallback, reports a filesystem fault, and remains degraded. NVS corruption or I/O failure likewise remains a degraded-state fault even when a JSON fallback succeeds. See [Filesystem architecture](docs/architecture/filesystem.md) for section ownership, recovery, and security rules.
 
 The bundle defines device identity, network and Wi-Fi behavior, Modbus serial settings, all six relay policies, KNX bindings, web/security flags, and indicator limits. Every file is required, each section is limited to 8192 bytes, and the assembled configuration is accepted only after complete schema and domain validation. Ethernet must remain disabled for the current board. Replace the development serial number and UUID with deployment-specific provisioned values before production; do not place secrets in these files.
 
-Build and upload the LittleFS configuration explicitly with `pio run -e ws_esp32-s3-relay-6ch -t buildfs` and `pio run -e ws_esp32-s3-relay-6ch -t uploadfs`. A normal firmware upload does not replace the filesystem image.
+Build and upload the LittleFS configuration explicitly with `pio run -e development -t buildfs` and `pio run -e development -t uploadfs`. A normal firmware upload does not replace the filesystem image.
+
+The firmware has explicit `development`, `engineering`, and `production` build profiles. Production is fail-closed, emits only a separately signed release artifact, and requires the audited secure-boot and flash-encryption manufacturing workflow described in [Security architecture](docs/architecture/security.md).
+
+Tagged builds publish the complete firmware, bootloader, partitions, filesystem, manifest, detached signature, checksums, version metadata, SPDX SBOM, and release notes package defined in [Release process](docs/release/release-process.md).
 
 ## Python
 
@@ -76,7 +70,7 @@ This is required to publish several firmware names in the github artifacts of a 
 
 ## Get Started
 
-<img src="doc/create-new-project-with-template.png" />
+<img src="docs/assets/create-new-project-with-template.png" />
 
 1. Login to github
 

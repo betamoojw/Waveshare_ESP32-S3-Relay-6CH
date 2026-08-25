@@ -4,6 +4,13 @@
 
 namespace
 {
+constexpr std::size_t applicationTaskStackBytes{8192};
+}
+
+SET_LOOP_TASK_STACK_SIZE(applicationTaskStackBytes);
+
+namespace
+{
 switch_actuator::app::Application &application() noexcept
 {
     static switch_actuator::app::Application instance{};

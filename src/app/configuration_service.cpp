@@ -132,19 +132,35 @@ ConfigurationCommitResult ConfigurationService::commit() noexcept
 
 ConfigurationFactoryResetResult ConfigurationService::factoryReset() noexcept
 {
-	if (settingsStore_.erase() != ports::SettingsEraseResult::Erased)
+	switch (eraseUserConfiguration())
 	{
-		lastSaveResult_ = ports::SettingsSaveResult::IoFailure;
+	case ConfigurationUserResetResult::Erased:
+		return ConfigurationFactoryResetResult::Erased;
+	case ConfigurationUserResetResult::InvalidIdentity:
+		return ConfigurationFactoryResetResult::InvalidIdentity;
+	case ConfigurationUserResetResult::PersistenceFailure:
 		return ConfigurationFactoryResetResult::PersistenceFailure;
 	}
+	return ConfigurationFactoryResetResult::PersistenceFailure;
+}
 
-	staged_.reset();
-	active_ = domain::makeSafeConfiguration();
-	activeConfigurationValid_ = false;
-	lastValidationError_ = domain::ConfigurationValidationError::None;
-	lastLoadResult_ = ports::SettingsLoadResult::NotFound;
-	lastSaveResult_ = ports::SettingsSaveResult::Saved;
-	return ConfigurationFactoryResetResult::Erased;
+ConfigurationUserResetResult ConfigurationService::eraseUserConfiguration() noexcept
+{
+	auto replacement = domain::makeSafeConfiguration();
+	replacement.productId = active_.productId;
+	replacement.boardModel = active_.boardModel;
+	replacement.hardwareRevision = active_.hardwareRevision;
+	replacement.deviceSerial = active_.deviceSerial;
+	replacement.deviceUuid = active_.deviceUuid;
+	replacement.manufacturingDate = active_.manufacturingDate;
+	replacement.manufacturingBatch = active_.manufacturingBatch;
+	if (stage(replacement) != ConfigurationStageResult::Staged)
+	{
+		return ConfigurationUserResetResult::InvalidIdentity;
+	}
+	const auto result = commit();
+	return result == ConfigurationCommitResult::Committed || result == ConfigurationCommitResult::CommittedRestartRequired ?
+		ConfigurationUserResetResult::Erased : ConfigurationUserResetResult::PersistenceFailure;
 }
 
 void ConfigurationService::discardStaged() noexcept

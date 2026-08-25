@@ -23,7 +23,7 @@ vi.mock('../../api/client', () => ({
 }))
 
 const capabilities: Capabilities = {
-  apiVersion: '1.0', minimumUiVersion: '1.0.0', deviceId: 'device', bootId: 'boot', model: 'test', channels: [],
+  apiVersion: '1.0', minimumUiVersion: '1.0.0', versions: { hardware: 'HW-A01', firmware: 'FW-1.4.0', configuration: 'CFG-4', api: 'API-v1', modbus: 'MODBUS-v1', knxApplication: 'KNX-APP-v1', filesystem: 'FS-v1' }, deviceId: 'device', bootId: 'boot', model: 'test', channels: [],
   features: { wifi: true, ethernet: false, modbus: true, knx: true, scenes: false, timers: false, remoteRestart: true, remoteFactoryReset: false, firmwareUpdate: false },
   permissions: ['configuration:read', 'configuration:write'],
 }

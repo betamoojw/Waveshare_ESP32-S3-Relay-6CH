@@ -4,6 +4,8 @@
 
 This document defines the normative parameter and communication-object requirements for the six-channel KNX/IP switching actuator. It complements `software-architecture-instructions.md`; that document remains authoritative for safety, layering, relay ownership, configuration persistence, and concurrency.
 
+The implemented baseline product contract is [KNX/IP](../docs/protocols/knx-ip.md). Sections describing the commercial feature set are roadmap requirements and MUST NOT be interpreted as currently exposed firmware or ETS product-data functionality.
+
 The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are requirements. "Communication object" means a KNX group object. Object numbers in this document are the stable project object numbers and are not copied from another manufacturer's application program.
 
 The profile is informed by the feature sets commonly offered by commercial ABB, MDT, and Theben KNX switch actuators: independent channel switching, applied-state feedback, central functions, startup behavior, delays, staircase timing, scenes, lock/forced operation, logic, counters, and diagnostics. It does not claim compatibility with, or certification as, any referenced product.

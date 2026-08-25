@@ -1,7 +1,5 @@
 #include "network_manager.h"
 
-#include <WiFi.h>
-
 #include <cstdio>
 #include <cstring>
 
@@ -12,41 +10,53 @@ namespace
 constexpr std::uint32_t profileAttemptTimeoutMs{20'000};
 constexpr std::uint32_t maximumRetryDelayMs{60'000};
 NetworkManager *activeManager{nullptr};
-
-void copyIpv4Address(const IPAddress &source, std::array<std::uint8_t, 4> &destination) noexcept
-{
-	for (std::size_t index = 0; index < destination.size(); ++index)
-	{
-		destination[index] = source[index];
-	}
-}
 }
 
-NetworkManager::NetworkManager(const bsp::BoardDescriptor &board,
+NetworkManager::NetworkManager(const hal::BoardDescriptor &board,
 	app::ConfigurationService &configurationService,
 	app::WifiManagementService &wifiManagementService,
+	WifiAdapter &wifiAdapter,
+	const ports::EthernetAdapterPort ethernetAdapter,
 	Stream &provisioningStream) noexcept
 	: board_{board}, configurationService_{configurationService}, wifiManagementService_{wifiManagementService},
-	  improv_{&provisioningStream}
+	  wifiAdapter_{wifiAdapter}, ethernetAdapter_{ethernetAdapter}, improv_{&provisioningStream}
 {
+}
+
+NetworkManager::~NetworkManager()
+{
+	shutdown();
 }
 
 void NetworkManager::initialize(const std::uint32_t nowMs) noexcept
 {
 	activeManager = this;
-	WiFi.persistent(false);
-	WiFi.mode(WIFI_STA);
-	WiFi.setAutoReconnect(false);
-	WiFi.setHostname(configuration().hostName.data());
+	if (board_.network.wifi)
+	{
+		wifiAdapter_.initialize(configuration().hostName.data());
+		improv_.setCustomConnectWiFi(provisionWifi);
+	}
 	improv_.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_S3, "SwitchActuator", "1.00", board_.model.data());
-	improv_.setCustomConnectWiFi(provisionWifi);
+	status_.wifiAvailable = board_.network.wifi;
+	status_.ethernetAvailable = board_.network.ethernet && ethernetAdapter_.isAvailable();
 	initialized_ = true;
-	if (!board_.wifiSupported || !configuration().enabled)
+	if (!board_.network.wifi || !configuration().enabled)
 	{
 		transition(ports::NetworkLifecycleState::Disabled, nowMs);
 		return;
 	}
 	beginNextProfile(nowMs);
+}
+
+void NetworkManager::shutdown() noexcept
+{
+	if (activeManager == this) activeManager = nullptr;
+	if (!initialized_) return;
+	ethernetAdapter_.shutdown();
+	if (status_.wifiAvailable) wifiAdapter_.shutdown();
+	status_ = {};
+	retryScheduled_ = false;
+	initialized_ = false;
 }
 
 void NetworkManager::update(const std::uint32_t nowMs) noexcept
@@ -55,20 +65,27 @@ void NetworkManager::update(const std::uint32_t nowMs) noexcept
 	{
 		return;
 	}
-	std::uint8_t noData{0};
-	static_cast<void>(improv_.handleBuffer(&noData, 0));
-	updateWifiScan();
-	if (!configuration().enabled || !board_.wifiSupported)
+	if (status_.wifiAvailable)
+	{
+		std::uint8_t noData{0};
+		static_cast<void>(improv_.handleBuffer(&noData, 0));
+		wifiAdapter_.updateScan(status_.wifiScan);
+	}
+	if (!configuration().enabled || !board_.network.wifi)
 	{
 		stopRecoveryAp();
 		transition(ports::NetworkLifecycleState::Disabled, nowMs);
 		return;
 	}
-	if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != INADDR_NONE)
+	const auto wifi = wifiAdapter_.connection();
+	if (wifi.online)
 	{
 		status_.infrastructureOnline = true;
-		status_.rssi = WiFi.RSSI();
-		updateIpStatus();
+		status_.activeTransport = ports::NetworkTransport::Wifi;
+		status_.rssi = wifi.rssi;
+		status_.ipv4Address = wifi.ipv4Address;
+		status_.gateway = wifi.gateway;
+		status_.dns = wifi.dns;
 		if (status_.state != ports::NetworkLifecycleState::OnlineWifi)
 		{
 			status_.lastConnectedAtMs = nowMs;
@@ -80,6 +97,7 @@ void NetworkManager::update(const std::uint32_t nowMs) noexcept
 		return;
 	}
 	status_.infrastructureOnline = false;
+	status_.activeTransport = ports::NetworkTransport::None;
 	if (status_.state == ports::NetworkLifecycleState::OnlineWifi)
 	{
 		retryAtMs_ = nowMs + retryDelayMs_;
@@ -107,7 +125,7 @@ void NetworkManager::update(const std::uint32_t nowMs) noexcept
 
 void NetworkManager::ingestProvisioning(const std::uint8_t *const data, const std::size_t length) noexcept
 {
-	if (initialized_ && data != nullptr && length != 0)
+	if (initialized_ && status_.wifiAvailable && data != nullptr && length != 0)
 	{
 		static_cast<void>(improv_.handleBuffer(const_cast<std::uint8_t *>(data), static_cast<std::uint16_t>(length)));
 	}
@@ -118,6 +136,11 @@ ports::NetworkStatusPort NetworkManager::statusPort() noexcept { return {statusC
 ports::NetworkControlPort NetworkManager::controlPort() noexcept
 {
 	return {startWifiScanCallback, connectWifiProfileCallback, applyConfigurationCallback, this};
+}
+
+hal::NetworkHal NetworkManager::hal() noexcept
+{
+	return {statusPort(), controlPort()};
 }
 
 const ports::NetworkStatusSnapshot &NetworkManager::statusCallback(void *const context) noexcept
@@ -173,13 +196,13 @@ bool NetworkManager::provisionWifiProfile(const std::uint8_t profileIndex,
 
 bool NetworkManager::connectWifiProfile(const std::uint8_t profileIndex, const std::uint32_t nowMs) noexcept
 {
-	if (!initialized_ || profileIndex >= configuration().wifiProfiles.size() ||
+	if (!initialized_ || !board_.network.wifi || profileIndex >= configuration().wifiProfiles.size() ||
 		!configuration().wifiProfiles[profileIndex].enabled)
 	{
 		return false;
 	}
 	stopRecoveryAp();
-	WiFi.disconnect(false, false);
+	wifiAdapter_.disconnect();
 	nextProfileIndex_ = profileIndex;
 	if (!configureProfile(profileIndex))
 	{
@@ -193,69 +216,18 @@ bool NetworkManager::connectWifiProfile(const std::uint8_t profileIndex, const s
 void NetworkManager::applyCommittedConfiguration(const std::uint32_t nowMs) noexcept
 {
 	stopRecoveryAp();
-	WiFi.disconnect(false, false);
+	wifiAdapter_.disconnect();
 	nextProfileIndex_ = 0;
 	beginNextProfile(nowMs);
 }
 
 bool NetworkManager::startWifiScan(const std::uint32_t nowMs) noexcept
 {
-	if (!initialized_ || !board_.wifiSupported || status_.wifiScan.state == ports::WifiScanState::Scanning)
+	if (!initialized_ || !board_.network.wifi || status_.wifiScan.state == ports::WifiScanState::Scanning)
 	{
 		return false;
 	}
-	WiFi.scanDelete();
-	status_.wifiScan.resultCount = 0;
-	status_.wifiScan.startedAtMs = nowMs;
-	status_.wifiScan.state = ports::WifiScanState::Scanning;
-	++status_.wifiScan.sequence;
-	if (WiFi.scanNetworks(true, true) == WIFI_SCAN_FAILED)
-	{
-		status_.wifiScan.state = ports::WifiScanState::Failed;
-		++status_.wifiScan.sequence;
-		return false;
-	}
-	return true;
-}
-
-void NetworkManager::updateWifiScan() noexcept
-{
-	if (status_.wifiScan.state != ports::WifiScanState::Scanning)
-	{
-		return;
-	}
-	const auto scanResult = WiFi.scanComplete();
-	if (scanResult == WIFI_SCAN_RUNNING)
-	{
-		return;
-	}
-	if (scanResult == WIFI_SCAN_FAILED)
-	{
-		status_.wifiScan.state = ports::WifiScanState::Failed;
-		++status_.wifiScan.sequence;
-		return;
-	}
-	const auto resultCount = std::min<std::size_t>(static_cast<std::size_t>(scanResult), status_.wifiScan.results.size());
-	for (std::size_t index = 0; index < resultCount; ++index)
-	{
-		auto &destination = status_.wifiScan.results[index];
-		const auto ssid = WiFi.SSID(static_cast<std::int32_t>(index));
-		std::snprintf(destination.ssid.data(), destination.ssid.size(), "%s", ssid.c_str());
-		destination.rssi = WiFi.RSSI(static_cast<std::int32_t>(index));
-		destination.channel = static_cast<std::uint8_t>(WiFi.channel(static_cast<std::int32_t>(index)));
-		destination.secured = WiFi.encryptionType(static_cast<std::int32_t>(index)) != WIFI_AUTH_OPEN;
-	}
-	status_.wifiScan.resultCount = static_cast<std::uint8_t>(resultCount);
-	status_.wifiScan.state = ports::WifiScanState::Complete;
-	++status_.wifiScan.sequence;
-	WiFi.scanDelete();
-}
-
-void NetworkManager::updateIpStatus() noexcept
-{
-	copyIpv4Address(WiFi.localIP(), status_.ipv4Address);
-	copyIpv4Address(WiFi.gatewayIP(), status_.gateway);
-	copyIpv4Address(WiFi.dnsIP(), status_.dns);
+	return wifiAdapter_.startScan(status_.wifiScan, nowMs);
 }
 
 bool NetworkManager::configureProfile(const std::uint8_t index) noexcept
@@ -265,16 +237,7 @@ bool NetworkManager::configureProfile(const std::uint8_t index) noexcept
 	{
 		return false;
 	}
-	if (profile.ipv4.mode == domain::IpMode::Static)
-	{
-		WiFi.config(IPAddress(profile.ipv4.address.data()), IPAddress(profile.ipv4.gateway.data()),
-			IPAddress(profile.ipv4.subnetMask.data()), IPAddress(profile.ipv4.dns.data()));
-	}
-	else
-	{
-		WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
-	}
-	WiFi.begin(profile.ssid.data(), profile.passphrase.data());
+	if (!wifiAdapter_.connect(profile)) return false;
 	status_.activeProfileIndex = index;
 	return true;
 }
@@ -316,8 +279,7 @@ void NetworkManager::startRecoveryAp(const std::uint32_t nowMs) noexcept
 	const auto &uuid = configurationService_.active().deviceUuid;
 	std::snprintf(ssid, sizeof(ssid), "%s-%02X%02X", configuration().recoveryAp.ssidPrefix.data(), uuid[14], uuid[15]);
 	std::snprintf(password, sizeof(password), "Rly%02X%02X%02X%02X%02X%02X", uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
-	WiFi.mode(WIFI_AP_STA);
-	status_.recoveryApActive = WiFi.softAP(ssid, password, configuration().recoveryAp.channel);
+	status_.recoveryApActive = wifiAdapter_.startRecoveryAp(ssid, password, configuration().recoveryAp.channel);
 	recoveryApStartedAtMs_ = nowMs;
 	retryAtMs_ = nowMs + retryDelayMs_;
 	retryScheduled_ = true;
@@ -328,9 +290,8 @@ void NetworkManager::stopRecoveryAp() noexcept
 {
 	if (status_.recoveryApActive)
 	{
-		WiFi.softAPdisconnect(true);
+		wifiAdapter_.stopRecoveryAp();
 		status_.recoveryApActive = false;
-		WiFi.mode(WIFI_STA);
 	}
 }
 

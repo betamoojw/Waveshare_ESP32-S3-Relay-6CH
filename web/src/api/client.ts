@@ -145,7 +145,7 @@ export const api = {
   device: async () => previewMode ? mockDevice : request('/device', deviceSchema),
   network: async () => previewMode ? mockNetwork : request('/network', networkSchema),
   relays: async () => previewMode ? getMockRelays() : request('/relays', relayListSchema),
-  diagnostics: async () => previewMode ? mockDiagnostics : request('/diagnostics', diagnosticsSchema),
+  diagnostics: async () => previewMode ? mockDiagnostics : request('/status', diagnosticsSchema),
   modbusConfiguration: async () => previewMode ? structuredClone(mockModbusConfiguration) : request('/protocols/modbus', modbusConfigurationSchema),
   saveModbusConfiguration: async (configuration: ModbusConfigurationUpdate) => {
     if (previewMode) return saveMockModbusConfiguration(configuration)
@@ -224,11 +224,11 @@ export const api = {
       method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Firmware-Filename': firmware.name }, body: firmware,
     })
   },
-  restart: async () => submitOperation('/maintenance/restart', { method: 'POST' }),
+  restart: async () => submitOperation('/reboot', { method: 'POST' }),
   commandRelay: async (channel: number, state: RelayState, expectedSequence: number) => {
     if (previewMode) return commandMockRelay(channel, state)
-    return request(`/relays/${channel}/commands`, commandResultSchema, {
-      method: 'POST',
+    return request(`/relays/${channel}`, commandResultSchema, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
       body: JSON.stringify({ action: state === 'on' ? 'setOn' : 'setOff', expectedSequence }),
     })

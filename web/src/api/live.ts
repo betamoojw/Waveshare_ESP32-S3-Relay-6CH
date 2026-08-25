@@ -108,7 +108,7 @@ export function connectLiveEvents(queryClient: QueryClient): () => void {
         return
       }
       if (envelope.type === 'protocol.error') {
-        if (envelope.payload?.code === 'protocol.version_mismatch') stopped = true
+        if (envelope.payload?.code === 'protocol_error') stopped = true
         return
       }
       if (envelope.type === 'session.ready' && envelope.payload?.bootId !== undefined) {

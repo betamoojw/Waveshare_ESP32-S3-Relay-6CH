@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../../domain/diagnostic_counters.h"
+#include "../../domain/relay_policy.h"
 #include "../../ports/settings_store.h"
 
 #include <Preferences.h>
@@ -14,6 +16,12 @@ enum class NvsInitializeResult : std::uint8_t
 	OpenFailure
 };
 
+struct DiagnosticCountersBootResult final
+{
+	domain::PersistentDiagnosticCounters counters{};
+	bool persisted{false};
+};
+
 class NvsSettingsStore final
 {
 public:
@@ -26,6 +34,8 @@ public:
 	NvsSettingsStore &operator=(NvsSettingsStore &&) = delete;
 
 	[[nodiscard]] NvsInitializeResult initialize() noexcept;
+	[[nodiscard]] DiagnosticCountersBootResult beginDiagnosticCounters(domain::ResetCategory resetReason) noexcept;
+	[[nodiscard]] bool saveDiagnosticCounters(const domain::PersistentDiagnosticCounters &counters) noexcept;
 	[[nodiscard]] ports::SettingsStore port() noexcept;
 	[[nodiscard]] bool isInitialized() const noexcept;
 

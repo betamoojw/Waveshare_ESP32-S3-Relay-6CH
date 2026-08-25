@@ -3,10 +3,12 @@
 #include "modbus_register_map.h"
 #include "../../app/diagnostics_service.h"
 #include "../../domain/configuration.h"
+#include "../../domain/error.h"
 #include "../../ports/modbus_rtu_control_port.h"
 #include "nanomodbus/nanomodbus.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace switch_actuator::adapters::modbus
 {
@@ -20,14 +22,7 @@ using SerialWriteHandler = std::int32_t (*)(void *context,
 										   std::int32_t byteTimeoutMs) noexcept;
 using SnapshotProvider = bool (*)(void *context, RegisterMapSnapshot &snapshot) noexcept;
 
-enum class WriteBatchResult : std::uint8_t
-{
-	Accepted,
-	IllegalValue,
-	QueueFull,
-	Failure
-};
-
+using WriteBatchResult = std::optional<domain::ErrorCode>;
 using WriteBatchHandler = WriteBatchResult (*)(void *context, const HoldingWriteBatch &batch) noexcept;
 
 struct ModbusRtuDependencies final

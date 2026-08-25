@@ -27,6 +27,8 @@ public:
 private:
 	[[nodiscard]] WriteBatchResult apply(const HoldingWriteBatch &batch) noexcept;
 	[[nodiscard]] WriteBatchResult applyUnitId(std::uint8_t unitId) noexcept;
+	[[nodiscard]] WriteBatchResult applyUartSettings(std::uint16_t encodedSettings) noexcept;
+	[[nodiscard]] WriteBatchResult commit(domain::Configuration replacement) noexcept;
 	void updateConfigurationDiagnostics() noexcept;
 
 	ModbusConfigurationGatewayDependencies dependencies_;

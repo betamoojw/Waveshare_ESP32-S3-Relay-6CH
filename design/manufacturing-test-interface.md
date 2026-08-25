@@ -9,12 +9,14 @@ The interface is a machine-readable serial CLI contract. It is available before 
 ## 2. Safety and Authorization
 
 1. Manufacturing commands MUST NOT access GPIO directly. Relay requests MUST pass through `SwitchingPolicyService`, the bounded command queue, and `RelayCommandService`.
-2. Mutating tests MUST require a build with `ENABLE_MUTATING_CLI_COMMANDS`, active BOOT-button maintenance authorization, and a lifecycle state that accepts ordinary commands.
+2. Mutating tests MUST require an unlocked deployment profile, active BOOT-button maintenance authorization, and a lifecycle state that accepts ordinary commands.
 3. Read-only snapshot and button observations MAY run without authorization over the local serial connection.
 4. Indicator tests MUST preserve configured brightness and buzzer-duty limits.
 5. The fixture MUST issue `mfg-test safe` before connecting or removing loads and before declaring a completed or aborted test.
 6. `safe` MUST request all relay channels off and clear temporary indicator overrides. It MUST NOT erase configuration, credentials, counters, or device identity.
 7. Manufacturing mode MUST NOT weaken web authentication, protocol authorization, relay arbitration, safety lockouts, or watchdog behavior.
+
+BOOT-button maintenance authorization is implemented as the time-bounded service session defined in [Service mode](../docs/manufacturing/service-mode.md). The same session protects identity, diagnostics, manufacturing-data, and field-service reset operations; no network transport can create it.
 
 ## 3. Transport Contract
 
@@ -35,7 +37,7 @@ mfg-test buzzer [0..7]
 mfg-test safe
 ```
 
-`snapshot` reports interface version, board model, hardware revision, device serial, configuration generation, authorization, subsystem initialization, network and Modbus state, button state, and all applied relay states. It MUST NOT expose secrets or mutable GPIO numbers.
+`snapshot` reports interface version, deployment profile, configuration lock, product ID, board model, hardware revision, device serial, UUID, manufacturing date and batch, configuration generation, authorization, subsystem initialization, network and Modbus state, button state, and all applied relay states. It MUST NOT expose secrets or mutable GPIO numbers.
 
 `button` reports initialized and pressed state. A fixture SHOULD sample released, pressed, and released. GPIO0 boot/download behavior remains part of the hardware release gate.
 

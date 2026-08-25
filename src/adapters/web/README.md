@@ -14,7 +14,7 @@ arbitrary filesystem path. Future static assets are restricted to an explicit
 allowlist under `/www/`; `/config/`, `/config/.backup/`, and NVS credentials are
 never web-readable. Essential pages should retain a compiled
 fallback when filesystem assets are unavailable. See
-`design/filesystem-architecture.md`.
+`docs/architecture/filesystem.md`.
 
 ## Management API contract
 
@@ -22,6 +22,9 @@ The React client uses same-origin `/api/v1` endpoints. Implementations must keep
 HTTP callbacks bounded and enqueue mutations for application-loop processing.
 Network callbacks must use `NetworkManager`; relay callbacks must use
 `SwitchingPolicyService` and may never write GPIO directly.
+
+The normative compatibility, security, limit, error, and wire-schema contract
+is [Web API v1](../../../docs/protocols/web-api.md).
 
 | Endpoint | Permission | Behavior |
 |---|---|---|
@@ -40,15 +43,40 @@ Network callbacks must use `NetworkManager`; relay callbacks must use
 | `PUT /protocols/modbus/role` | `configuration:write` | Queue an immediate runtime switch between RTU server and client roles |
 | `GET /protocols/knx` | `configuration:read` | Return generation, KNX/IP timing, device objects, and six channel bindings |
 | `PUT /protocols/knx` | `configuration:write` | Queue a generation-safe validated KNX/IP configuration commit and controlled restart |
-| `GET /diagnostics` | `diagnostics:read` | Return bounded runtime, fault, protocol, heap, queue, and WebSocket pressure state |
+| `GET /diagnostics` | `diagnostics:read` | Return the standardized bounded device diagnostics snapshot described below |
 | `GET /ws` | `relay:read` | Open one versioned live channel per authenticated session |
 | `GET /users` | `users:manage` | List username, role, and enabled state only |
 | `POST /users` | `users:manage` | Create a bounded administrator or guest profile |
 | `PUT /users/{id}` | `users:manage` | Change role, enabled state, or password verifier |
 | `POST /maintenance/restart` | `configuration:write` | Queue a lifecycle-controlled restart with a bounded response-drain window |
+| `GET /status` | `diagnostics:read` | Canonical alias for the bounded diagnostics snapshot |
+| `PUT /relays/{id}` | `relay:command` | Canonical alias for an idempotent queued relay command |
+| `POST /reboot` | `configuration:write` | Canonical alias for a lifecycle-controlled restart |
+| `POST /factory-reset` | `configuration:write` | Reject remote reset; require the physical BOOT gesture |
+| `POST /ota` | `configuration:write` | Return a stable unavailable response while OTA is disabled |
 
 Passphrases, password verifiers, JWT signing material, and private keys are never
 returned by any endpoint or stored under LittleFS `/config/`.
+
+### Standardized diagnostics
+
+`GET /diagnostics` and `GET /status` project the application-owned snapshot as
+bounded `device`, `firmware`, `hardware`, `memory`, `cpu`, `network`, `storage`,
+`protocols`, `relays`, `faultState`, and `faults` sections. This includes uptime,
+persisted boot count, reset category, current and minimum heap, PSRAM capacity,
+CPU frequency and core count, connectivity and Wi-Fi RSSI, Modbus and KNX state,
+relay requested/applied state, and active faults.
+
+The `persistentCounters` section contains `bootCount`, `watchdogCount`,
+`brownoutCount`, `configErrorCount`, `otaFailureCount`, `networkFailureCount`,
+`modbusErrorCount`, `knxErrorCount`, and `storageErrorCount`. Reset counters are
+updated during boot; other counters are batched in RAM and checkpointed no more
+than once per minute while dirty.
+
+The diagnostics model has no credential-bearing fields. In particular, its
+network section contains only lifecycle state, connectivity, recovery-AP state,
+RSSI, and IP address. It never contains SSIDs, Wi-Fi passphrases, user passwords,
+password verifiers, cookies, tokens, keys, certificates, or raw configuration.
 
 ## Authentication requirements
 

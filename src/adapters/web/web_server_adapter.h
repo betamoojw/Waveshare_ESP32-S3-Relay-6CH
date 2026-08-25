@@ -1,5 +1,8 @@
 #pragma once
 
+#include "web_api_v1_contract.h"
+#include "web_error_representation.h"
+
 #include "../../app/configuration_service.h"
 #include "../../app/diagnostics_service.h"
 #include "../../app/relay_command_service.h"
@@ -69,10 +72,13 @@ public:
 	[[nodiscard]] bool isRunning() const noexcept;
 
 private:
-	static constexpr std::size_t maximumWebSocketClients{2};
-	static constexpr std::size_t maximumFrameBytes{2048};
+	static constexpr std::size_t maximumWebSocketClients{api_v1::maximumWebSocketClients};
+	static constexpr std::size_t maximumFrameBytes{api_v1::maximumRequestBodyBytes};
 	static constexpr std::size_t maximumStaticAssets{16};
-	static constexpr std::uint32_t clientIdleTimeoutMs{60'000};
+	static constexpr std::size_t reservedHttpSockets{3};
+	static constexpr std::size_t maximumOpenSockets{maximumWebSocketClients + reservedHttpSockets};
+	static constexpr std::size_t httpsTaskStackBytes{8192};
+	static constexpr std::uint32_t clientIdleTimeoutMs{api_v1::webSocketIdleTimeoutMs};
 	static constexpr std::uint32_t pendingAuthorizationTimeoutMs{10'000};
 
 	struct ClientState final
@@ -102,7 +108,7 @@ private:
 
 	void registerRoutes() noexcept;
 	[[nodiscard]] bool loadStaticAssetManifest() noexcept;
-	[[nodiscard]] bool authorize(PsychicRequest *request,
+	[[nodiscard]] ports::WebAuthorizationResult authorize(PsychicRequest *request,
 		ports::WebPermission permission,
 		bool mutation,
 		ports::WebAuthorization &authorization) const noexcept;
@@ -125,6 +131,8 @@ private:
 	[[nodiscard]] esp_err_t sendUsers(PsychicRequest *request, PsychicResponse *response) const noexcept;
 	[[nodiscard]] esp_err_t saveUser(PsychicRequest *request, PsychicResponse *response) noexcept;
 	[[nodiscard]] esp_err_t requestRestart(PsychicRequest *request, PsychicResponse *response) noexcept;
+	[[nodiscard]] esp_err_t rejectFactoryReset(PsychicRequest *request, PsychicResponse *response) const noexcept;
+	[[nodiscard]] esp_err_t rejectOta(PsychicRequest *request, PsychicResponse *response) const noexcept;
 	[[nodiscard]] esp_err_t startWifiScan(PsychicRequest *request, PsychicResponse *response) noexcept;
 	[[nodiscard]] esp_err_t saveWifiProfile(PsychicRequest *request, PsychicResponse *response) noexcept;
 	[[nodiscard]] esp_err_t removeWifiProfile(PsychicRequest *request, PsychicResponse *response) noexcept;
@@ -150,7 +158,9 @@ private:
 	[[nodiscard]] esp_err_t sendManifestAsset(PsychicRequest *request, PsychicResponse *response) const noexcept;
 	[[nodiscard]] esp_err_t sendIndex(PsychicRequest *request, PsychicResponse *response) const noexcept;
 	[[nodiscard]] esp_err_t sendUnauthorized(PsychicResponse *response) const noexcept;
-	[[nodiscard]] esp_err_t sendUnavailable(PsychicResponse *response, const char *code) const noexcept;
+	[[nodiscard]] esp_err_t sendAuthorizationFailure(PsychicResponse *response,
+		ports::WebAuthorizationResult result) const noexcept;
+	[[nodiscard]] esp_err_t sendError(PsychicResponse *response, domain::ErrorCode error) const noexcept;
 	void onWebSocketOpen(PsychicWebSocketClient *client) noexcept;
 	void onWebSocketClose(PsychicWebSocketClient *client) noexcept;
 	[[nodiscard]] esp_err_t onWebSocketFrame(PsychicWebSocketRequest *request, httpd_ws_frame *frame) noexcept;

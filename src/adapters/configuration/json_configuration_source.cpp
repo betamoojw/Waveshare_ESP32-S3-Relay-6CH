@@ -234,7 +234,25 @@ template <std::size_t Capacity>
 template <std::size_t Capacity>
 [[nodiscard]] bool readOptionalText(const JsonVariantConst value, std::array<char, Capacity> &output) noexcept
 {
-	return value.isNull() || readText(value, output);
+	if (value.isNull())
+	{
+		return true;
+	}
+	if (!value.is<const char *>())
+	{
+		return false;
+	}
+	const auto *text = value.as<const char *>();
+	if (text == nullptr)
+	{
+		return false;
+	}
+	if (*text == '\0')
+	{
+		output.fill('\0');
+		return true;
+	}
+	return readText(value, output);
 }
 
 [[nodiscard]] bool readIpv4Address(const JsonVariantConst value, std::array<std::uint8_t, 4> &output) noexcept
@@ -370,13 +388,16 @@ ports::ConfigurationSourceResult JsonConfigurationSource::load(domain::Configura
 
 	domain::Configuration parsed{};
 	const auto sourceSchemaVersion = root["schemaVersion"].as<std::uint16_t>();
-	if (sourceSchemaVersion != 1 && sourceSchemaVersion != 2 && sourceSchemaVersion != domain::currentConfigurationSchemaVersion)
+	if (sourceSchemaVersion < 1 || sourceSchemaVersion > domain::currentConfigurationSchemaVersion)
 	{
 		return ports::ConfigurationSourceResult::Invalid;
 	}
 	parsed.schemaVersion = domain::currentConfigurationSchemaVersion;
 	parsed.generation = 0;
-	if (!readText(identity["boardModel"], parsed.boardModel) ||
+	if ((sourceSchemaVersion >= 4 && (!readText(identity["productId"], parsed.productId.value) ||
+			!readOptionalText(identity["manufacturingDate"], parsed.manufacturingDate.iso8601) ||
+			!identity["manufacturingBatch"].is<std::uint32_t>())) ||
+		!readText(identity["boardModel"], parsed.boardModel) ||
 		!readText(identity["hardwareRevision"], parsed.hardwareRevision) ||
 		!readText(identity["deviceSerial"], parsed.deviceSerial) || !readUuid(identity["deviceUuid"], parsed.deviceUuid) ||
 		!modbus["unitId"].is<std::uint8_t>() || !modbus["baudRate"].is<std::uint32_t>() ||
@@ -384,6 +405,10 @@ ports::ConfigurationSourceResult JsonConfigurationSource::load(domain::Configura
 		!modbus["stopBits"].is<std::uint8_t>())
 	{
 		return ports::ConfigurationSourceResult::Invalid;
+	}
+	if (sourceSchemaVersion >= 4)
+	{
+		parsed.manufacturingBatch = identity["manufacturingBatch"].as<std::uint32_t>();
 	}
 	parsed.modbus.unitId = modbus["unitId"].as<std::uint8_t>();
 	parsed.modbus.baudRate = modbus["baudRate"].as<std::uint32_t>();

@@ -1,5 +1,9 @@
 #include "knx_adapter.h"
 
+#include "knx_error_representation.h"
+#include "../../app/error_mapping.h"
+#include "knx_application_model.h"
+
 #include <WiFi.h>
 
 #include <limits>
@@ -58,16 +62,16 @@ KnxInitializeResult KnxAdapter::initialize(const domain::KnxConfiguration &confi
 	}
 	for (const auto &channel : configuration_.channels)
 	{
-		if (channel.switchGroupAddress != 0)
+		if (isConfiguredGroupAddress(channel.switchGroupAddress))
 		{
 			::knx.callback_assign(callbackId, addressFromRaw(channel.switchGroupAddress));
 		}
 	}
-	if (configuration_.centralSwitchGroupAddress != 0)
+	if (isConfiguredGroupAddress(configuration_.centralSwitchGroupAddress))
 	{
 		::knx.callback_assign(callbackId, addressFromRaw(configuration_.centralSwitchGroupAddress));
 	}
-	if (configuration_.centralOffGroupAddress != 0)
+	if (isConfiguredGroupAddress(configuration_.centralOffGroupAddress))
 	{
 		::knx.callback_assign(callbackId, addressFromRaw(configuration_.centralOffGroupAddress));
 	}
@@ -138,7 +142,7 @@ void KnxAdapter::onTelegram(const message_t &message) noexcept
 	const auto channel = channelFor(message.received_on);
 	const auto centralSwitch = matches(message.received_on, configuration_.centralSwitchGroupAddress);
 	const auto centralOff = matches(message.received_on, configuration_.centralOffGroupAddress);
-	if ((channel == invalidChannel && !centralSwitch && !centralOff) || message.data == nullptr || message.data_len == 0)
+	if ((channel == invalidChannel && !centralSwitch && !centralOff) || message.data == nullptr || message.data_len != 1)
 	{
 		dependencies_.diagnostics->recordKnxTelegram(false);
 		return;
@@ -171,10 +175,10 @@ void KnxAdapter::onTelegram(const message_t &message) noexcept
 	}
 
 	const auto value = ::knx.data_to_bool(message.data);
-	const auto accepted = channel != invalidChannel ? enqueueChannelCommand(channel, value) :
+	const auto error = channel != invalidChannel ? enqueueChannelCommand(channel, value) :
 		enqueueCentralCommand(value, centralOff);
-	dependencies_.diagnostics->recordKnxTelegram(accepted);
-	if (!accepted)
+	dependencies_.diagnostics->recordKnxTelegram(!error.has_value());
+	if (error.has_value() && represent(*error) == KnxErrorRepresentation::SilentRejectBusy)
 	{
 		dependencies_.diagnostics->recordCommandQueueFull(dependencies_.clock.nowMs());
 	}
@@ -199,8 +203,8 @@ bool KnxAdapter::startTransport(const std::uint32_t nowMs) noexcept
 	{
 		publishedSequences_[channel] = snapshots[channel].transitionSequence;
 		statusPublished_[channel] = !configuration_.channels[channel].sendStatusAfterStartup ||
-			configuration_.channels[channel].statusGroupAddress == 0;
-		faultPublished_[channel] = configuration_.channels[channel].faultGroupAddress == 0;
+			!isConfiguredGroupAddress(configuration_.channels[channel].statusGroupAddress);
+		faultPublished_[channel] = !isConfiguredGroupAddress(configuration_.channels[channel].faultGroupAddress);
 		lastStatusPublishedAtMs_[channel] = nowMs;
 	}
 	dependencies_.diagnostics->updateKnx(true, true);
@@ -209,22 +213,22 @@ bool KnxAdapter::startTransport(const std::uint32_t nowMs) noexcept
 	return true;
 }
 
-bool KnxAdapter::enqueueChannelCommand(const std::size_t channel, const bool value) noexcept
+std::optional<domain::ErrorCode> KnxAdapter::enqueueChannelCommand(const std::size_t channel, const bool value) noexcept
 {
 	const auto requestedOn = value != configuration_.channels[channel].commandPolarityInverted;
-	return dependencies_.switchingPolicy->requestChannel(
+	return app::errorCode(dependencies_.switchingPolicy->requestChannel(
 		domain::RelayChannelId{static_cast<std::uint8_t>(channel)},
 		requestedOn ? domain::RelayAction::SetOn : domain::RelayAction::SetOff,
 		domain::CommandSource::Knx,
 		nextCorrelationId(),
-		dependencies_.clock.nowMs()) == app::SwitchingPolicyResult::Accepted;
+		dependencies_.clock.nowMs()));
 }
 
-bool KnxAdapter::enqueueCentralCommand(const bool value, const bool centralOff) noexcept
+std::optional<domain::ErrorCode> KnxAdapter::enqueueCentralCommand(const bool value, const bool centralOff) noexcept
 {
 	if (centralOff && !value)
 	{
-		return true;
+		return std::nullopt;
 	}
 	std::array<bool, domain::relayChannelCount> participants{};
 	for (std::size_t channel = 0; channel < configuration_.channels.size(); ++channel)
@@ -232,12 +236,11 @@ bool KnxAdapter::enqueueCentralCommand(const bool value, const bool centralOff) 
 		participants[channel] = centralOff ? configuration_.channels[channel].participatesInCentralOff :
 			configuration_.channels[channel].participatesInCentralSwitch;
 	}
-	const auto result = dependencies_.switchingPolicy->requestGroup(participants,
+	return app::errorCode(dependencies_.switchingPolicy->requestGroup(participants,
 		centralOff || !value ? domain::RelayAction::SetOff : domain::RelayAction::SetOn,
 		domain::CommandSource::Knx,
 		nextCorrelationId(),
-		dependencies_.clock.nowMs());
-	return result == app::SwitchingPolicyResult::Accepted || result == app::SwitchingPolicyResult::NoParticipants;
+		dependencies_.clock.nowMs()));
 }
 
 void KnxAdapter::publishPending(const std::uint32_t nowMs) noexcept
@@ -256,7 +259,7 @@ bool KnxAdapter::publishChangedState(const std::uint32_t nowMs) noexcept
 	for (std::size_t channel = 0; channel < snapshots.size(); ++channel)
 	{
 		const auto &channelConfiguration = configuration_.channels[channel];
-		if (channelConfiguration.statusGroupAddress == 0)
+		if (!isConfiguredGroupAddress(channelConfiguration.statusGroupAddress))
 		{
 			continue;
 		}
@@ -285,7 +288,7 @@ bool KnxAdapter::publishChangedFault(const std::uint32_t nowMs) noexcept
 	for (std::size_t channel = 0; channel < snapshots.size(); ++channel)
 	{
 		const auto address = configuration_.channels[channel].faultGroupAddress;
-		if (address == 0)
+		if (!isConfiguredGroupAddress(address))
 		{
 			continue;
 		}
@@ -305,7 +308,7 @@ bool KnxAdapter::publishChangedFault(const std::uint32_t nowMs) noexcept
 
 bool KnxAdapter::publishDeviceFault(const std::uint32_t nowMs) noexcept
 {
-	if (configuration_.deviceFaultGroupAddress == 0)
+	if (!isConfiguredGroupAddress(configuration_.deviceFaultGroupAddress))
 	{
 		return false;
 	}
@@ -323,7 +326,7 @@ bool KnxAdapter::publishDeviceFault(const std::uint32_t nowMs) noexcept
 
 bool KnxAdapter::publishHeartbeat(const std::uint32_t nowMs) noexcept
 {
-	if (configuration_.heartbeatGroupAddress == 0 || configuration_.heartbeatIntervalMs == 0 ||
+	if (!isConfiguredGroupAddress(configuration_.heartbeatGroupAddress) || configuration_.heartbeatIntervalMs == 0 ||
 		!elapsed(nowMs, lastHeartbeatPublishedAtMs_, configuration_.heartbeatIntervalMs))
 	{
 		return false;
@@ -377,7 +380,7 @@ std::uint32_t KnxAdapter::nextCorrelationId() noexcept
 
 bool KnxAdapter::matches(const address_t address, const std::uint16_t configuredAddress) noexcept
 {
-	return configuredAddress != 0 && addressFromRaw(configuredAddress).value == address.value;
+	return isConfiguredGroupAddress(configuredAddress) && addressFromRaw(configuredAddress).value == address.value;
 }
 
 bool KnxAdapter::elapsed(const std::uint32_t nowMs, const std::uint32_t sinceMs, const std::uint32_t intervalMs) noexcept

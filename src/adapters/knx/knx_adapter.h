@@ -4,6 +4,7 @@
 #include "../../app/relay_command_service.h"
 #include "../../app/switching_policy_service.h"
 #include "../../domain/configuration.h"
+#include "../../domain/error.h"
 #include "../../ports/clock_port.h"
 #include "../../ports/network_status_port.h"
 
@@ -11,6 +12,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 
 namespace switch_actuator::adapters::knx
 {
@@ -58,8 +60,8 @@ private:
 	static void handleTelegram(const message_t &message, void *context) noexcept;
 	void onTelegram(const message_t &message) noexcept;
 	[[nodiscard]] bool startTransport(std::uint32_t nowMs) noexcept;
-	[[nodiscard]] bool enqueueChannelCommand(std::size_t channel, bool value) noexcept;
-	[[nodiscard]] bool enqueueCentralCommand(bool value, bool centralOff) noexcept;
+	[[nodiscard]] std::optional<domain::ErrorCode> enqueueChannelCommand(std::size_t channel, bool value) noexcept;
+	[[nodiscard]] std::optional<domain::ErrorCode> enqueueCentralCommand(bool value, bool centralOff) noexcept;
 	void publishPending(std::uint32_t nowMs) noexcept;
 	[[nodiscard]] bool publishChangedState(std::uint32_t nowMs) noexcept;
 	[[nodiscard]] bool publishChangedFault(std::uint32_t nowMs) noexcept;

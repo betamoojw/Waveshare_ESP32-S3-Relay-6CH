@@ -1,5 +1,7 @@
 #include "web_server_adapter.h"
 
+#include "../../app/error_mapping.h"
+
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <PsychicFileResponse.h>
@@ -73,7 +75,35 @@ const char *networkStateText(const ports::NetworkLifecycleState state) noexcept
 	case ports::NetworkLifecycleState::ConnectingWifi: return "connecting";
 	case ports::NetworkLifecycleState::OnlineWifi: return "online";
 	case ports::NetworkLifecycleState::RecoveryAp: return "recovery-ap";
+	case ports::NetworkLifecycleState::ConnectingEthernet: return "connecting-ethernet";
+	case ports::NetworkLifecycleState::OnlineEthernet: return "online-ethernet";
 	default: return "disabled";
+	}
+}
+
+const char *networkTransportText(const ports::NetworkTransport transport) noexcept
+{
+	switch (transport)
+	{
+	case ports::NetworkTransport::Wifi: return "wifi";
+	case ports::NetworkTransport::Ethernet: return "ethernet";
+	case ports::NetworkTransport::None: return "none";
+	default: return "none";
+	}
+}
+
+const char *resetReasonText(const domain::ResetCategory reason) noexcept
+{
+	switch (reason)
+	{
+	case domain::ResetCategory::PowerOn: return "power-on";
+	case domain::ResetCategory::ControlledRestart: return "controlled-restart";
+	case domain::ResetCategory::Brownout: return "brownout";
+	case domain::ResetCategory::Watchdog: return "watchdog";
+	case domain::ResetCategory::Panic: return "panic";
+	case domain::ResetCategory::RepeatedBoot: return "repeated-boot";
+	case domain::ResetCategory::Unknown:
+	default: return "unknown";
 	}
 }
 
@@ -126,6 +156,16 @@ esp_err_t sendJson(PsychicResponse *const response, const int status, const char
 	addSecurityHeaders(response);
 	response->addHeader("Cache-Control", "no-store");
 	return response->send(status, jsonContentType, body);
+}
+
+esp_err_t sendWebSocketError(PsychicWebSocketRequest *const request, const domain::ErrorCode error) noexcept
+{
+	const auto representation = represent(error);
+	char message[160]{};
+	std::snprintf(message, sizeof(message),
+		"{\"version\":1,\"type\":\"protocol.error\",\"sequence\":0,\"payload\":{\"code\":\"%s\"}}",
+		representation.code);
+	return request->reply(message);
 }
 
 bool parseRelayAction(const char *const value, domain::RelayAction &action) noexcept
@@ -217,7 +257,7 @@ bool parseKnxGroupAddress(const JsonVariantConst value, std::uint16_t &output) n
 
 bool parseProfileIndex(const std::string_view path, const std::string_view suffix, std::uint8_t &index) noexcept
 {
-	constexpr std::string_view prefix{"/api/v1/network/wifi/profiles/"};
+	constexpr std::string_view prefix{api_v1::route::wifiProfilesPrefix};
 	if (path.size() != prefix.size() + 1U + suffix.size() || path.substr(0, prefix.size()) != prefix ||
 		path.substr(prefix.size() + 1U) != suffix || path[prefix.size()] < '0' || path[prefix.size()] > '9') return false;
 	index = static_cast<std::uint8_t>(path[prefix.size()] - '0');
@@ -245,6 +285,7 @@ const char *faultCodeText(const domain::FaultCode code) noexcept
 	case domain::FaultCode::RepeatedBoot: return "reset.repeated_boot";
 	case domain::FaultCode::ResourceExhaustion: return "runtime.resource_exhaustion";
 	case domain::FaultCode::FileSystemFailure: return "filesystem.failure";
+	case domain::FaultCode::SecurityPolicyFailure: return "security.policy_failure";
 	default: return "fault.unknown";
 	}
 }
@@ -285,8 +326,8 @@ WebServerInitializeResult WebServerAdapter::initialize() noexcept
 	static_cast<void>(loadStaticAssetManifest());
 	server_.maxRequestBodySize = maximumFrameBytes;
 	server_.maxUploadSize = 0;
-	server_.config.max_open_sockets = maximumWebSocketClients + 3;
-	server_.config.stack_size = 8192;
+	server_.config.max_open_sockets = maximumOpenSockets;
+	server_.config.stack_size = httpsTaskStackBytes;
 	server_.setCertificate(reinterpret_cast<const std::uint8_t *>(certificate.data()), certificate.size(),
 		reinterpret_cast<const std::uint8_t *>(privateKey.data()), privateKey.size());
 	registerRoutes();
@@ -325,33 +366,38 @@ void WebServerAdapter::registerRoutes() noexcept
 	if (routesRegistered_) return;
 	routesRegistered_ = true;
 	server_.setURIMatchFunction(MATCH_WILDCARD);
-	server_.on("/api/v1/session", HTTP_POST, [this](auto *request, auto *response) { return createSession(request, response); });
-	server_.on("/api/v1/session", HTTP_GET, [this](auto *request, auto *response) { return sendSession(request, response); });
-	server_.on("/api/v1/session", HTTP_DELETE, [this](auto *request, auto *response) { return deleteSession(request, response); });
-	server_.on("/api/v1/capabilities", HTTP_GET, [this](auto *request, auto *response) { return sendCapabilities(request, response); });
-	server_.on("/api/v1/device", HTTP_GET, [this](auto *request, auto *response) { return sendDevice(request, response); });
-	server_.on("/api/v1/diagnostics", HTTP_GET, [this](auto *request, auto *response) { return sendDiagnostics(request, response); });
-	server_.on("/api/v1/network", HTTP_GET, [this](auto *request, auto *response) { return sendNetwork(request, response); });
-	server_.on("/api/v1/relays", HTTP_GET, [this](auto *request, auto *response) { return sendRelays(request, response); });
-	server_.on("/api/v1/network/wifi", HTTP_GET, [this](auto *request, auto *response) { return sendWifi(request, response); });
-	server_.on("/api/v1/protocols/modbus", HTTP_GET, [this](auto *request, auto *response) { return sendModbusConfiguration(request, response); });
-	server_.on("/api/v1/protocols/modbus", HTTP_PUT, [this](auto *request, auto *response) { return saveModbusConfiguration(request, response); });
-	server_.on("/api/v1/protocols/modbus/role", HTTP_PUT, [this](auto *request, auto *response) { return setModbusRole(request, response); });
-	server_.on("/api/v1/protocols/knx", HTTP_GET, [this](auto *request, auto *response) { return sendKnxConfiguration(request, response); });
-	server_.on("/api/v1/protocols/knx", HTTP_PUT, [this](auto *request, auto *response) { return saveKnxConfiguration(request, response); });
-	server_.on("/api/v1/users", HTTP_GET, [this](auto *request, auto *response) { return sendUsers(request, response); });
-	server_.on("/api/v1/users", HTTP_POST, [this](auto *request, auto *response) { return saveUser(request, response); });
-	server_.on("/api/v1/users/*", HTTP_PUT, [this](auto *request, auto *response) { return saveUser(request, response); });
-	server_.on("/api/v1/maintenance/restart", HTTP_POST, [this](auto *request, auto *response) { return requestRestart(request, response); });
-	server_.on("/api/v1/network/wifi/scan", HTTP_POST, [this](auto *request, auto *response) { return startWifiScan(request, response); });
-	server_.on("/api/v1/network/wifi/profiles/*/move", HTTP_POST, [this](auto *request, auto *response) { return moveWifiProfile(request, response); });
-	server_.on("/api/v1/network/wifi/profiles/*/connect", HTTP_POST, [this](auto *request, auto *response) { return connectWifiProfile(request, response); });
-	server_.on("/api/v1/network/wifi/profiles/*", HTTP_PUT, [this](auto *request, auto *response) { return saveWifiProfile(request, response); });
-	server_.on("/api/v1/network/wifi/profiles/*", HTTP_DELETE, [this](auto *request, auto *response) { return removeWifiProfile(request, response); });
-	server_.on("/api/v1/network/wifi/recovery-ap", HTTP_PUT, [this](auto *request, auto *response) { return saveRecoveryAp(request, response); });
-	server_.on("/api/v1/relays/*/commands", HTTP_POST, [this](auto *request, auto *response) { return submitRelayCommand(request, response); });
-	server_.on("/api/v1/commands/*", HTTP_GET, [this](auto *request, auto *response) { return getCommandResult(request, response); });
-	server_.on("/api/v1/operations/*", HTTP_GET, [this](auto *request, auto *response) { return getOperationResult(request, response); });
+	server_.on(api_v1::route::session, HTTP_POST, [this](auto *request, auto *response) { return createSession(request, response); });
+	server_.on(api_v1::route::session, HTTP_GET, [this](auto *request, auto *response) { return sendSession(request, response); });
+	server_.on(api_v1::route::session, HTTP_DELETE, [this](auto *request, auto *response) { return deleteSession(request, response); });
+	server_.on(api_v1::route::capabilities, HTTP_GET, [this](auto *request, auto *response) { return sendCapabilities(request, response); });
+	server_.on(api_v1::route::status, HTTP_GET, [this](auto *request, auto *response) { return sendDiagnostics(request, response); });
+	server_.on(api_v1::route::device, HTTP_GET, [this](auto *request, auto *response) { return sendDevice(request, response); });
+	server_.on(api_v1::route::diagnostics, HTTP_GET, [this](auto *request, auto *response) { return sendDiagnostics(request, response); });
+	server_.on(api_v1::route::network, HTTP_GET, [this](auto *request, auto *response) { return sendNetwork(request, response); });
+	server_.on(api_v1::route::relays, HTTP_GET, [this](auto *request, auto *response) { return sendRelays(request, response); });
+	server_.on(api_v1::route::wifi, HTTP_GET, [this](auto *request, auto *response) { return sendWifi(request, response); });
+	server_.on(api_v1::route::modbus, HTTP_GET, [this](auto *request, auto *response) { return sendModbusConfiguration(request, response); });
+	server_.on(api_v1::route::modbus, HTTP_PUT, [this](auto *request, auto *response) { return saveModbusConfiguration(request, response); });
+	server_.on(api_v1::route::modbusRole, HTTP_PUT, [this](auto *request, auto *response) { return setModbusRole(request, response); });
+	server_.on(api_v1::route::knx, HTTP_GET, [this](auto *request, auto *response) { return sendKnxConfiguration(request, response); });
+	server_.on(api_v1::route::knx, HTTP_PUT, [this](auto *request, auto *response) { return saveKnxConfiguration(request, response); });
+	server_.on(api_v1::route::users, HTTP_GET, [this](auto *request, auto *response) { return sendUsers(request, response); });
+	server_.on(api_v1::route::users, HTTP_POST, [this](auto *request, auto *response) { return saveUser(request, response); });
+	server_.on(api_v1::route::user, HTTP_PUT, [this](auto *request, auto *response) { return saveUser(request, response); });
+	server_.on(api_v1::route::restart, HTTP_POST, [this](auto *request, auto *response) { return requestRestart(request, response); });
+	server_.on(api_v1::route::reboot, HTTP_POST, [this](auto *request, auto *response) { return requestRestart(request, response); });
+	server_.on(api_v1::route::factoryReset, HTTP_POST, [this](auto *request, auto *response) { return rejectFactoryReset(request, response); });
+	server_.on(api_v1::route::ota, HTTP_POST, [this](auto *request, auto *response) { return rejectOta(request, response); });
+	server_.on(api_v1::route::wifiScan, HTTP_POST, [this](auto *request, auto *response) { return startWifiScan(request, response); });
+	server_.on(api_v1::route::wifiProfileMove, HTTP_POST, [this](auto *request, auto *response) { return moveWifiProfile(request, response); });
+	server_.on(api_v1::route::wifiProfileConnect, HTTP_POST, [this](auto *request, auto *response) { return connectWifiProfile(request, response); });
+	server_.on(api_v1::route::wifiProfiles, HTTP_PUT, [this](auto *request, auto *response) { return saveWifiProfile(request, response); });
+	server_.on(api_v1::route::wifiProfiles, HTTP_DELETE, [this](auto *request, auto *response) { return removeWifiProfile(request, response); });
+	server_.on(api_v1::route::wifiRecoveryAp, HTTP_PUT, [this](auto *request, auto *response) { return saveRecoveryAp(request, response); });
+	server_.on(api_v1::route::relayCommands, HTTP_POST, [this](auto *request, auto *response) { return submitRelayCommand(request, response); });
+	server_.on(api_v1::route::relay, HTTP_PUT, [this](auto *request, auto *response) { return submitRelayCommand(request, response); });
+	server_.on(api_v1::route::commands, HTTP_GET, [this](auto *request, auto *response) { return getCommandResult(request, response); });
+	server_.on(api_v1::route::operations, HTTP_GET, [this](auto *request, auto *response) { return getOperationResult(request, response); });
 	server_.on("/assets/*", HTTP_GET, [this](auto *request, auto *response) { return sendManifestAsset(request, response); });
 	for (const auto *route : {"/", "/login", "/protocols", "/diagnostics", "/settings", "/maintenance"})
 	{
@@ -361,9 +407,9 @@ void WebServerAdapter::registerRoutes() noexcept
 	webSocket_.onOpen([this](auto *client) { onWebSocketOpen(client); });
 	webSocket_.onClose([this](auto *client) { onWebSocketClose(client); });
 	webSocket_.onFrame([this](auto *request, auto *frame) { return onWebSocketFrame(request, frame); });
-	server_.on("/api/v1/ws", HTTP_GET, &webSocket_);
-	server_.onNotFound([](auto *, auto *response) {
-		return sendJson(response, 404, "{\"error\":{\"code\":\"route.not_found\",\"message\":\"Route not found.\"}}");
+	server_.on(api_v1::route::webSocket, HTTP_GET, &webSocket_);
+	server_.onNotFound([this](auto *, auto *response) {
+		return sendError(response, domain::ErrorCode::NotFound);
 	});
 }
 
@@ -396,7 +442,7 @@ bool WebServerAdapter::loadStaticAssetManifest() noexcept
 	return staticAssetCount_ > 0;
 }
 
-bool WebServerAdapter::authorize(PsychicRequest *const request,
+ports::WebAuthorizationResult WebServerAdapter::authorize(PsychicRequest *const request,
 	const ports::WebPermission permission,
 	const bool mutation,
 	ports::WebAuthorization &authorization) const noexcept
@@ -405,11 +451,12 @@ bool WebServerAdapter::authorize(PsychicRequest *const request,
 		permission != ports::WebPermission::ConfigurationRead &&
 		permission != ports::WebPermission::ConfigurationWrite)
 	{
-		return false;
+		return ports::WebAuthorizationResult::Forbidden;
 	}
 	std::array<char, 1024> token{};
 	auto tokenSize = token.size();
-	if (request->getCookie("__Host-switch_session", token.data(), &tokenSize) != ESP_OK) return false;
+	if (request->getCookie("__Host-switch_session", token.data(), &tokenSize) != ESP_OK)
+		return ports::WebAuthorizationResult::Unauthenticated;
 	std::array<char, 192> origin{};
 	std::array<char, 96> host{};
 	std::array<char, 96> csrf{};
@@ -419,8 +466,9 @@ bool WebServerAdapter::authorize(PsychicRequest *const request,
 		std::snprintf(destination.data(), destination.size(), "%s", value);
 		return true;
 	};
-	if (!canonicalizeManagementIdentity(dependencies_, request, mutation, origin, host)) return false;
-	if (mutation && !copyHeader("X-CSRF-Token", csrf)) return false;
+	if (!canonicalizeManagementIdentity(dependencies_, request, mutation, origin, host))
+		return ports::WebAuthorizationResult::Forbidden;
+	if (mutation && !copyHeader("X-CSRF-Token", csrf)) return ports::WebAuthorizationResult::Forbidden;
 	return dependencies_.security.authorize(boundedText(token.data(), token.size()), boundedText(origin.data(), origin.size()),
 		boundedText(host.data(), host.size()), boundedText(csrf.data(), csrf.size()), permission, mutation, authorization);
 }
@@ -429,7 +477,8 @@ bool WebServerAdapter::authorizeWebSocket(PsychicRequest *const request) noexcep
 {
 	if (!request->hasHeader("Origin") || dependencies_.networkStatus.snapshot().recoveryApActive) return false;
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::RelayRead, false, authorization)) return false;
+	if (authorize(request, ports::WebPermission::RelayRead, false, authorization) !=
+		ports::WebAuthorizationResult::Authorized) return false;
 	if (std::any_of(clients_.begin(), clients_.end(), [&authorization](const auto &client) {
 		return client.client != nullptr && client.sessionId == authorization.sessionId;
 	}) || std::any_of(pendingAuthorizations_.begin(), pendingAuthorizations_.end(), [&authorization](const auto &pending) {
@@ -444,25 +493,20 @@ bool WebServerAdapter::authorizeWebSocket(PsychicRequest *const request) noexcep
 
 esp_err_t WebServerAdapter::createSession(PsychicRequest *request, PsychicResponse *response) noexcept
 {
-	if (dependencies_.securityService == nullptr || request->contentLength() > 1024U || request->loadBody() != ESP_OK)
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid\",\"message\":\"Invalid credentials.\"}}");
+	if (dependencies_.securityService == nullptr) return sendError(response, domain::ErrorCode::InternalError);
+	if (request->contentLength() > 1024U || request->loadBody() != ESP_OK)
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	JsonDocument document;
 	if (deserializeJson(document, request->bodyCStr()) != DeserializationError::Ok)
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid_json\",\"message\":\"Invalid credentials.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	const auto *username = document["username"].as<const char *>();
 	const auto *password = document["password"].as<const char *>();
 	if (username == nullptr || password == nullptr)
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid\",\"message\":\"Invalid credentials.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	app::WebSessionCreated created{};
 	const auto result = dependencies_.securityService->createSession(username, password, created);
-	if (result == app::WebSessionResult::RateLimited)
-	{
-		response->addHeader("Retry-After", "300");
-		return sendJson(response, 429, "{\"error\":{\"code\":\"session.rate_limited\",\"message\":\"Sign-in is temporarily unavailable.\"}}");
-	}
-	if (result == app::WebSessionResult::CapacityFull) return sendUnavailable(response, "session.capacity");
 	if (result != app::WebSessionResult::Applied)
-		return sendJson(response, 401, "{\"error\":{\"code\":\"session.invalid_credentials\",\"message\":\"Invalid credentials.\"}}");
+		return sendError(response, app::errorCode(result).value_or(domain::ErrorCode::InternalError));
 	char cookie[896]{};
 	std::snprintf(cookie, sizeof(cookie), "__Host-switch_session=%s; Path=/; Max-Age=900; HttpOnly; Secure; SameSite=Strict",
 		created.jwt.data());
@@ -532,17 +576,28 @@ esp_err_t WebServerAdapter::sendSessionView(PsychicResponse *response, const app
 	append(ports::WebPermission::UsersManage, "users:manage");
 	append(ports::WebPermission::FirmwareUpdate, "firmware:update");
 	char body[1024]{};
-	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendUnavailable(response, "response.capacity");
+	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendError(response, domain::ErrorCode::Busy);
 	return sendJson(response, 200, body);
 }
 
 esp_err_t WebServerAdapter::sendCapabilities(PsychicRequest *request, PsychicResponse *response) const noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::RelayRead, false, authorization)) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::RelayRead, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
 	JsonDocument document;
-	document["apiVersion"] = "1.0";
-	document["minimumUiVersion"] = "1.0.0";
+	document["apiVersion"] = api_v1::version;
+	document["minimumUiVersion"] = api_v1::minimumUiVersion;
+	const auto &configuration = dependencies_.configuration->active();
+	const auto &diagnostics = dependencies_.diagnostics->snapshot();
+	document["versions"]["hardware"] = configuration.hardwareRevision.data();
+	document["versions"]["firmware"] = diagnostics.firmwareVersion.data();
+	document["versions"]["configuration"] = domain::compatibility::configuration.label.data();
+	document["versions"]["api"] = api_v1::compatibilityVersion.data();
+	document["versions"]["modbus"] = domain::compatibility::modbus.label.data();
+	document["versions"]["knxApplication"] = domain::compatibility::knxApplication.label.data();
+	document["versions"]["filesystem"] = domain::compatibility::filesystem.label.data();
 	document["deviceId"] = "local-device";
 	document["bootId"] = bootId_.data();
 	document["model"] = "Waveshare ESP32-S3 Relay 6CH";
@@ -556,8 +611,9 @@ esp_err_t WebServerAdapter::sendCapabilities(PsychicRequest *request, PsychicRes
 		item["physicalLabel"] = label;
 		item["contactFeedback"] = false;
 	}
-	document["features"]["wifi"] = true;
-	document["features"]["ethernet"] = false;
+	const auto &network = dependencies_.networkStatus.snapshot();
+	document["features"]["wifi"] = network.wifiAvailable;
+	document["features"]["ethernet"] = network.ethernetAvailable;
 	document["features"]["modbus"] = true;
 	document["features"]["knx"] = true;
 	document["features"]["scenes"] = false;
@@ -577,14 +633,17 @@ esp_err_t WebServerAdapter::sendCapabilities(PsychicRequest *request, PsychicRes
 	append(ports::WebPermission::UsersManage, "users:manage");
 	append(ports::WebPermission::FirmwareUpdate, "firmware:update");
 	char body[2048]{};
-	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendUnavailable(response, "response.capacity");
+	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendError(response, domain::ErrorCode::Busy);
 	return sendJson(response, 200, body);
 }
 
 esp_err_t WebServerAdapter::sendDevice(PsychicRequest *request, PsychicResponse *response) const noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::DiagnosticsRead, false, authorization) || dependencies_.diagnostics == nullptr) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::DiagnosticsRead, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.diagnostics == nullptr) return sendError(response, domain::ErrorCode::InternalError);
 	const auto &snapshot = dependencies_.diagnostics->snapshot();
 	char body[768]{};
 	std::snprintf(body, sizeof(body), "{\"name\":\"Switch actuator\",\"model\":\"%s\",\"serialSuffix\":\"local\",\"firmwareVersion\":\"%s\",\"buildId\":\"%s\",\"uptimeMs\":%lu,\"lifecycle\":\"%s\",\"lifecycleReason\":\"runtime\",\"configurationGeneration\":%lu}", snapshot.boardModel.data(), snapshot.firmwareVersion.data(), snapshot.buildId.data(), static_cast<unsigned long>(snapshot.uptimeMs), snapshot.lifecycleState == app::LifecycleState::Operational ? "operational" : "degraded", static_cast<unsigned long>(snapshot.configurationGeneration));
@@ -594,11 +653,56 @@ esp_err_t WebServerAdapter::sendDevice(PsychicRequest *request, PsychicResponse 
 esp_err_t WebServerAdapter::sendDiagnostics(PsychicRequest *request, PsychicResponse *response) const noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::DiagnosticsRead, false, authorization) || dependencies_.diagnostics == nullptr ||
-		dependencies_.configuration == nullptr) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::DiagnosticsRead, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.diagnostics == nullptr || dependencies_.configuration == nullptr)
+		return sendError(response, domain::ErrorCode::InternalError);
 	const auto &snapshot = dependencies_.diagnostics->snapshot();
 	const auto &configuration = dependencies_.configuration->active();
 	JsonDocument document;
+	document["device"]["uptimeMs"] = snapshot.uptimeMs;
+	document["device"]["bootCount"] = snapshot.bootCount;
+	document["device"]["resetReason"] = resetReasonText(snapshot.resetReason);
+	document["device"]["lifecycle"] = snapshot.lifecycleState == app::LifecycleState::Operational ? "operational" : "degraded";
+	document["persistentCounters"]["bootCount"] = snapshot.persistentCounters.bootCount;
+	document["persistentCounters"]["watchdogCount"] = snapshot.persistentCounters.watchdogCount;
+	document["persistentCounters"]["brownoutCount"] = snapshot.persistentCounters.brownoutCount;
+	document["persistentCounters"]["configErrorCount"] = snapshot.persistentCounters.configErrorCount;
+	document["persistentCounters"]["otaFailureCount"] = snapshot.persistentCounters.otaFailureCount;
+	document["persistentCounters"]["networkFailureCount"] = snapshot.persistentCounters.networkFailureCount;
+	document["persistentCounters"]["modbusErrorCount"] = snapshot.persistentCounters.modbusErrorCount;
+	document["persistentCounters"]["knxErrorCount"] = snapshot.persistentCounters.knxErrorCount;
+	document["persistentCounters"]["storageErrorCount"] = snapshot.persistentCounters.storageErrorCount;
+	document["firmware"]["version"] = snapshot.firmwareVersion.data();
+	document["firmware"]["buildId"] = snapshot.buildId.data();
+	document["hardware"]["model"] = snapshot.boardModel.data();
+	document["hardware"]["revision"] = snapshot.hardwareRevision.data();
+	document["memory"]["freeHeapBytes"] = snapshot.runtime.freeHeapBytes;
+	document["memory"]["minimumFreeHeapBytes"] = snapshot.runtime.minimumFreeHeapBytes;
+	document["memory"]["largestFreeHeapBlockBytes"] = snapshot.runtime.largestFreeHeapBlockBytes;
+	document["memory"]["psram"]["available"] = snapshot.runtime.psramTotalBytes != 0;
+	document["memory"]["psram"]["totalBytes"] = snapshot.runtime.psramTotalBytes;
+	document["memory"]["psram"]["freeBytes"] = snapshot.runtime.psramFreeBytes;
+	document["memory"]["psram"]["minimumFreeBytes"] = snapshot.runtime.psramMinimumFreeBytes;
+	document["cpu"]["frequencyMhz"] = snapshot.runtime.cpuFrequencyMhz;
+	document["cpu"]["coreCount"] = snapshot.runtime.cpuCoreCount;
+	document["network"]["state"] = networkStateText(snapshot.network.state);
+	document["network"]["activeTransport"] = networkTransportText(snapshot.network.activeTransport);
+	document["network"]["connected"] = snapshot.network.connected;
+	document["network"]["wifiAvailable"] = snapshot.network.wifiAvailable;
+	document["network"]["ethernetAvailable"] = snapshot.network.ethernetAvailable;
+	document["network"]["recoveryApActive"] = snapshot.network.recoveryApActive;
+	document["network"]["wifiRssiDbm"] = snapshot.network.wifiRssiDbm;
+	char diagnosticAddress[16]{};
+	formatIpv4(snapshot.network.ipv4Address, diagnosticAddress);
+	if (hasIpv4(snapshot.network.ipv4Address)) document["network"]["ipv4Address"] = diagnosticAddress;
+	else document["network"]["ipv4Address"] = nullptr;
+	document["storage"]["filesystemAvailable"] = snapshot.storage.filesystemAvailable;
+	document["storage"]["settingsAvailable"] = snapshot.storage.settingsAvailable;
+	document["storage"]["settingsHealthy"] = snapshot.storage.settingsHealthy;
+	document["storage"]["configurationValid"] = snapshot.configurationValid;
+	document["storage"]["configurationGeneration"] = snapshot.configurationGeneration;
 	document["configurationValid"] = snapshot.configurationValid;
 	document["persistenceHealthy"] = snapshot.lastSettingsSaveResult == ports::SettingsSaveResult::Saved;
 	document["taskWatchdogHealthy"] = snapshot.taskWatchdogHealthy;
@@ -631,7 +735,21 @@ esp_err_t WebServerAdapter::sendDiagnostics(PsychicRequest *request, PsychicResp
 		item["summary"] = faultCodeText(fault.code);
 		item["occurrenceCount"] = fault.occurrenceCount;
 	}
-	document["protocols"]["modbus"]["available"] = true;
+	document["faultState"]["activeCount"] = snapshot.activeFaultCount;
+	document["faultState"]["active"] = snapshot.activeFaultCount != 0;
+	auto relays = document["relays"].to<JsonArray>();
+	for (std::size_t index = 0; index < snapshot.relays.size(); ++index)
+	{
+		const auto &relay = snapshot.relays[index];
+		auto item = relays.add<JsonObject>();
+		item["id"] = index;
+		item["requestedState"] = stateText(relay.requestedState);
+		item["appliedState"] = stateText(relay.appliedState);
+		item["lockedOut"] = relay.lockedOut;
+		item["faulted"] = relay.fault != domain::RelayFault::None;
+		item["transitionSequence"] = relay.transitionSequence;
+	}
+	document["protocols"]["modbus"]["available"] = snapshot.modbus.available;
 	document["protocols"]["modbus"]["unitId"] = configuration.modbus.unitId;
 	document["protocols"]["modbus"]["baudRate"] = configuration.modbus.baudRate;
 	document["protocols"]["modbus"]["validRequests"] = snapshot.modbus.validRequests;
@@ -650,30 +768,42 @@ esp_err_t WebServerAdapter::sendDiagnostics(PsychicRequest *request, PsychicResp
 	}
 	document["protocols"]["knx"]["validTelegrams"] = snapshot.knx.validTelegrams;
 	document["protocols"]["knx"]["errors"] = snapshot.knx.telegramErrors;
-	char body[3072]{};
-	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendUnavailable(response, "response.capacity");
+	char body[4096]{};
+	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendError(response, domain::ErrorCode::Busy);
 	return sendJson(response, 200, body);
 }
 
 esp_err_t WebServerAdapter::sendNetwork(PsychicRequest *request, PsychicResponse *response) const noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::DiagnosticsRead, false, authorization)) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::DiagnosticsRead, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
 	const auto &snapshot = dependencies_.networkStatus.snapshot();
 	char address[16]{};
 	formatIpv4(snapshot.ipv4Address, address);
+	JsonDocument document;
+	document["state"] = networkStateText(snapshot.state);
+	document["activeTransport"] = networkTransportText(snapshot.activeTransport);
+	if (hasIpv4(snapshot.ipv4Address)) document["ipv4Address"] = address;
+	else document["ipv4Address"] = nullptr;
+	document["rssi"] = snapshot.rssi;
+	if (snapshot.activeProfileIndex == 0xFF) document["activeProfileIndex"] = nullptr;
+	else document["activeProfileIndex"] = snapshot.activeProfileIndex;
+	document["recoveryApActive"] = snapshot.recoveryApActive;
+	document["lastConnectedAgeMs"] = nullptr;
 	char body[512]{};
-	if (snapshot.activeProfileIndex == 0xFF)
-		std::snprintf(body, sizeof(body), "{\"state\":\"%s\",\"ipv4Address\":%s%s%s,\"rssi\":%ld,\"activeProfileIndex\":null,\"recoveryApActive\":%s,\"lastConnectedAgeMs\":null}", networkStateText(snapshot.state), hasIpv4(snapshot.ipv4Address) ? "\"" : "", hasIpv4(snapshot.ipv4Address) ? address : "null", hasIpv4(snapshot.ipv4Address) ? "\"" : "", static_cast<long>(snapshot.rssi), snapshot.recoveryApActive ? "true" : "false");
-	else
-		std::snprintf(body, sizeof(body), "{\"state\":\"%s\",\"ipv4Address\":%s%s%s,\"rssi\":%ld,\"activeProfileIndex\":%u,\"recoveryApActive\":%s,\"lastConnectedAgeMs\":null}", networkStateText(snapshot.state), hasIpv4(snapshot.ipv4Address) ? "\"" : "", hasIpv4(snapshot.ipv4Address) ? address : "null", hasIpv4(snapshot.ipv4Address) ? "\"" : "", static_cast<long>(snapshot.rssi), snapshot.activeProfileIndex, snapshot.recoveryApActive ? "true" : "false");
+	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendError(response, domain::ErrorCode::Busy);
 	return sendJson(response, 200, body);
 }
 
 esp_err_t WebServerAdapter::sendRelays(PsychicRequest *request, PsychicResponse *response) const noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::RelayRead, false, authorization) || dependencies_.relayService == nullptr) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::RelayRead, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.relayService == nullptr) return sendError(response, domain::ErrorCode::HardwareError);
 	char body[3072]{};
 	std::size_t used = static_cast<std::size_t>(std::snprintf(body, sizeof(body), "{\"bootId\":\"%s\",\"snapshotSequence\":%lu,\"relays\":[", bootId_.data(), dependencies_.events != nullptr ? static_cast<unsigned long>(dependencies_.events->latestSequence()) : 0UL));
 	const auto &snapshots = dependencies_.relayService->snapshots();
@@ -682,7 +812,7 @@ esp_err_t WebServerAdapter::sendRelays(PsychicRequest *request, PsychicResponse 
 		const auto &relay = snapshots[index];
 		used += static_cast<std::size_t>(std::snprintf(body + used, sizeof(body) - used, "%s{\"id\":%u,\"physicalLabel\":\"CH%u\",\"requestedState\":\"%s\",\"appliedState\":\"%s\",\"verification\":\"gpio-write\",\"lastSource\":\"%s\",\"transitionSequence\":%lu,\"lastTransitionAgeMs\":0,\"fault\":%s,\"lockedOut\":%s,\"enabled\":true}", index == 0 ? "" : ",", static_cast<unsigned>(index), static_cast<unsigned>(index + 1), stateText(relay.requestedState), stateText(relay.appliedState), sourceText(relay.lastCommandSource), static_cast<unsigned long>(relay.transitionSequence), relay.fault == domain::RelayFault::None ? "null" : "\"Output unavailable\"", relay.lockedOut ? "true" : "false"));
 	}
-	if (used + 3 >= sizeof(body)) return sendUnavailable(response, "response.capacity");
+	if (used + 3 >= sizeof(body)) return sendError(response, domain::ErrorCode::Busy);
 	std::snprintf(body + used, sizeof(body) - used, "]}");
 	return sendJson(response, 200, body);
 }
@@ -690,7 +820,10 @@ esp_err_t WebServerAdapter::sendRelays(PsychicRequest *request, PsychicResponse 
 esp_err_t WebServerAdapter::sendWifi(PsychicRequest *request, PsychicResponse *response) const noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationRead, false, authorization) || dependencies_.wifiManagement == nullptr) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationRead, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.wifiManagement == nullptr) return sendError(response, domain::ErrorCode::NetworkError);
 	const auto wifi = dependencies_.wifiManagement->snapshot();
 	const auto &network = dependencies_.networkStatus.snapshot();
 	JsonDocument document;
@@ -732,15 +865,18 @@ esp_err_t WebServerAdapter::sendWifi(PsychicRequest *request, PsychicResponse *r
 	document["recoveryAp"]["remainActiveWhileOffline"] = wifi.recoveryAp.remainActiveWhileOffline;
 	document["recoveryAp"]["active"] = network.recoveryApActive;
 	char body[4096]{};
-	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendUnavailable(response, "response.capacity");
+	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendError(response, domain::ErrorCode::Busy);
 	return sendJson(response, 200, body);
 }
 
 esp_err_t WebServerAdapter::sendModbusConfiguration(PsychicRequest *request, PsychicResponse *response) const noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationRead, false, authorization) ||
-		dependencies_.configuration == nullptr || !dependencies_.modbusControl.isValid()) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationRead, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.configuration == nullptr || !dependencies_.modbusControl.isValid())
+		return sendError(response, domain::ErrorCode::ProtocolError);
 	const auto &configuration = dependencies_.configuration->active();
 	const auto &modbus = configuration.modbus;
 	const auto *parity = modbus.parity == domain::SerialParity::None ? "none" :
@@ -760,18 +896,20 @@ esp_err_t WebServerAdapter::sendModbusConfiguration(PsychicRequest *request, Psy
 esp_err_t WebServerAdapter::saveModbusConfiguration(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization)) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
 	if (request->contentLength() > 512U || request->loadBody() != ESP_OK)
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid\",\"message\":\"Invalid Modbus configuration.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	JsonDocument document;
 	if (deserializeJson(document, request->bodyCStr()) != DeserializationError::Ok ||
 		!document["unitId"].is<std::uint8_t>() || !document["baudRate"].is<std::uint32_t>() ||
 		!document["stopBits"].is<std::uint8_t>() || !document["expectedGeneration"].is<std::uint32_t>())
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid_json\",\"message\":\"Invalid Modbus configuration.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	const auto *parity = document["parity"].as<const char *>();
 	if (parity == nullptr || (std::strcmp(parity, "none") != 0 && std::strcmp(parity, "even") != 0 &&
 		std::strcmp(parity, "odd") != 0))
-		return sendJson(response, 422, "{\"error\":{\"code\":\"modbus.invalid_parity\",\"message\":\"Invalid serial parity.\"}}");
+		return sendError(response, domain::ErrorCode::ConfigurationError);
 	app::WebApplicationRequest operation{};
 	operation.type = app::WebRequestType::SaveModbusConfiguration;
 	operation.operationId = esp_random();
@@ -790,15 +928,17 @@ esp_err_t WebServerAdapter::saveModbusConfiguration(PsychicRequest *request, Psy
 esp_err_t WebServerAdapter::setModbusRole(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization)) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
 	if (request->contentLength() > 128U || request->loadBody() != ESP_OK)
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid\",\"message\":\"Invalid Modbus role.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	JsonDocument document;
 	if (deserializeJson(document, request->bodyCStr()) != DeserializationError::Ok)
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid_json\",\"message\":\"Invalid Modbus role.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	const auto *role = document["role"].as<const char *>();
 	if (role == nullptr || (std::strcmp(role, "server") != 0 && std::strcmp(role, "client") != 0))
-		return sendJson(response, 422, "{\"error\":{\"code\":\"modbus.invalid_role\",\"message\":\"Invalid Modbus role.\"}}");
+		return sendError(response, domain::ErrorCode::ConfigurationError);
 	app::WebApplicationRequest operation{};
 	operation.type = app::WebRequestType::SetModbusRole;
 	operation.operationId = esp_random();
@@ -812,8 +952,10 @@ esp_err_t WebServerAdapter::setModbusRole(PsychicRequest *request, PsychicRespon
 esp_err_t WebServerAdapter::sendKnxConfiguration(PsychicRequest *request, PsychicResponse *response) const noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationRead, false, authorization) ||
-		dependencies_.configuration == nullptr) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationRead, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.configuration == nullptr) return sendError(response, domain::ErrorCode::ProtocolError);
 	const auto &active = dependencies_.configuration->active();
 	const auto &knx = active.knx;
 	JsonDocument document;
@@ -854,16 +996,18 @@ esp_err_t WebServerAdapter::sendKnxConfiguration(PsychicRequest *request, Psychi
 		item["participatesInCentralOff"] = channel.participatesInCentralOff;
 	}
 	char body[4096]{};
-	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendUnavailable(response, "response.capacity");
+	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendError(response, domain::ErrorCode::Busy);
 	return sendJson(response, 200, body);
 }
 
 esp_err_t WebServerAdapter::saveKnxConfiguration(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization)) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
 	if (request->contentLength() > 4096U || request->loadBody() != ESP_OK)
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid\",\"message\":\"Invalid KNX configuration.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	JsonDocument document;
 	if (deserializeJson(document, request->bodyCStr()) != DeserializationError::Ok ||
 		!document["expectedGeneration"].is<std::uint32_t>() || !document["enabled"].is<bool>() ||
@@ -872,10 +1016,10 @@ esp_err_t WebServerAdapter::saveKnxConfiguration(PsychicRequest *request, Psychi
 		!document["cyclicStatusIntervalMs"].is<std::uint32_t>() ||
 		!document["heartbeatIntervalMs"].is<std::uint32_t>() || !document["readSwitchObject"].is<bool>() ||
 		!document["channels"].is<JsonArrayConst>())
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid_json\",\"message\":\"Invalid KNX configuration.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	const auto channels = document["channels"].as<JsonArrayConst>();
 	if (channels.size() != domain::relayChannelCount)
-		return sendJson(response, 422, "{\"error\":{\"code\":\"knx.invalid_channels\",\"message\":\"Exactly six KNX channels are required.\"}}");
+		return sendError(response, domain::ErrorCode::ConfigurationError);
 	domain::KnxConfiguration configuration{};
 	configuration.enabled = document["enabled"];
 	configuration.startupTransmitDelayMs = document["startupTransmitDelayMs"];
@@ -888,7 +1032,7 @@ esp_err_t WebServerAdapter::saveKnxConfiguration(PsychicRequest *request, Psychi
 		!parseKnxGroupAddress(document["centralSwitchGroupAddress"], configuration.centralSwitchGroupAddress) ||
 		!parseKnxGroupAddress(document["centralOffGroupAddress"], configuration.centralOffGroupAddress) ||
 		!parseKnxGroupAddress(document["deviceFaultGroupAddress"], configuration.deviceFaultGroupAddress))
-		return sendJson(response, 422, "{\"error\":{\"code\":\"knx.invalid_address\",\"message\":\"Invalid KNX address.\"}}");
+		return sendError(response, domain::ErrorCode::ConfigurationError);
 	std::size_t index{0};
 	for (const auto value : channels)
 	{
@@ -896,12 +1040,12 @@ esp_err_t WebServerAdapter::saveKnxConfiguration(PsychicRequest *request, Psychi
 		if (channel.isNull() || !channel["commandPolarityInverted"].is<bool>() ||
 			!channel["statusPolarityInverted"].is<bool>() || !channel["sendStatusAfterStartup"].is<bool>() ||
 			!channel["participatesInCentralSwitch"].is<bool>() || !channel["participatesInCentralOff"].is<bool>())
-			return sendJson(response, 400, "{\"error\":{\"code\":\"knx.invalid_channel\",\"message\":\"Invalid KNX channel.\"}}");
+			return sendError(response, domain::ErrorCode::InvalidArgument);
 		auto &target = configuration.channels[index++];
 		if (!parseKnxGroupAddress(channel["switchGroupAddress"], target.switchGroupAddress) ||
 			!parseKnxGroupAddress(channel["statusGroupAddress"], target.statusGroupAddress) ||
 			!parseKnxGroupAddress(channel["faultGroupAddress"], target.faultGroupAddress))
-			return sendJson(response, 422, "{\"error\":{\"code\":\"knx.invalid_address\",\"message\":\"Invalid KNX group address.\"}}");
+			return sendError(response, domain::ErrorCode::ConfigurationError);
 		target.commandPolarityInverted = channel["commandPolarityInverted"];
 		target.statusPolarityInverted = channel["statusPolarityInverted"];
 		target.sendStatusAfterStartup = channel["sendStatusAfterStartup"];
@@ -921,8 +1065,10 @@ esp_err_t WebServerAdapter::saveKnxConfiguration(PsychicRequest *request, Psychi
 esp_err_t WebServerAdapter::sendUsers(PsychicRequest *request, PsychicResponse *response) const noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::UsersManage, false, authorization) ||
-		dependencies_.securityService == nullptr) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::UsersManage, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.securityService == nullptr) return sendError(response, domain::ErrorCode::InternalError);
 	std::array<app::WebUserView, ports::webUserCapacity> users{};
 	const auto count = dependencies_.securityService->users(users);
 	JsonDocument document;
@@ -936,19 +1082,21 @@ esp_err_t WebServerAdapter::sendUsers(PsychicRequest *request, PsychicResponse *
 		item["enabled"] = users[index].enabled;
 	}
 	char body[1024]{};
-	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendUnavailable(response, "response.capacity");
+	if (serializeJson(document, body, sizeof(body)) >= sizeof(body) - 1U) return sendError(response, domain::ErrorCode::Busy);
 	return sendJson(response, 200, body);
 }
 
 esp_err_t WebServerAdapter::saveUser(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::UsersManage, true, authorization)) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::UsersManage, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
 	if (request->contentLength() > 1024U || request->loadBody() != ESP_OK)
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid\",\"message\":\"Invalid user.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	JsonDocument document;
 	if (deserializeJson(document, request->bodyCStr()) != DeserializationError::Ok ||
-		!document["enabled"].is<bool>()) return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid\",\"message\":\"Invalid user.\"}}");
+		!document["enabled"].is<bool>()) return sendError(response, domain::ErrorCode::InvalidArgument);
 	app::WebApplicationRequest operation{};
 	operation.type = app::WebRequestType::SaveUser;
 	operation.operationId = esp_random();
@@ -957,23 +1105,23 @@ esp_err_t WebServerAdapter::saveUser(PsychicRequest *request, PsychicResponse *r
 	const auto *role = document["role"].as<const char *>();
 	if (!copyJsonText(document["username"], operation.username) || role == nullptr ||
 		(std::strcmp(role, "administrator") != 0 && std::strcmp(role, "guest") != 0))
-		return sendJson(response, 422, "{\"error\":{\"code\":\"user.invalid\",\"message\":\"Invalid user.\"}}");
+		return sendError(response, domain::ErrorCode::ConfigurationError);
 	operation.userRole = std::strcmp(role, "administrator") == 0 ? ports::WebUserRole::Administrator :
 		ports::WebUserRole::Guest;
 	if (!document["password"].isNull())
 	{
 		operation.replacePassword = true;
 		if (!copyJsonText(document["password"], operation.password))
-			return sendJson(response, 422, "{\"error\":{\"code\":\"user.invalid_password\",\"message\":\"Invalid password.\"}}");
+			return sendError(response, domain::ErrorCode::ConfigurationError);
 	}
 	const auto path = boundedText(request->pathCStr(), 96);
-	if (path != "/api/v1/users")
+	if (path != api_v1::route::users)
 	{
-		constexpr std::string_view prefix{"/api/v1/users/"};
+		constexpr std::string_view prefix{api_v1::route::usersPrefix};
 		unsigned long userId{};
 		char trailing{};
 		if (path.substr(0, prefix.size()) != prefix || std::sscanf(path.data() + prefix.size(), "%lu%c", &userId, &trailing) != 1)
-			return sendJson(response, 404, "{\"error\":{\"code\":\"user.not_found\",\"message\":\"User not found.\"}}");
+			return sendError(response, domain::ErrorCode::NotFound);
 		operation.userId = static_cast<std::uint32_t>(userId);
 	}
 	operation.receivedAtMs = millis();
@@ -983,7 +1131,9 @@ esp_err_t WebServerAdapter::saveUser(PsychicRequest *request, PsychicResponse *r
 esp_err_t WebServerAdapter::requestRestart(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization)) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
 	app::WebApplicationRequest operation{};
 	operation.type = app::WebRequestType::Restart;
 	operation.operationId = esp_random();
@@ -992,10 +1142,30 @@ esp_err_t WebServerAdapter::requestRestart(PsychicRequest *request, PsychicRespo
 	return enqueueOperation(response, operation);
 }
 
+esp_err_t WebServerAdapter::rejectFactoryReset(PsychicRequest *request, PsychicResponse *response) const noexcept
+{
+	ports::WebAuthorization authorization{};
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	return sendError(response, domain::ErrorCode::Forbidden);
+}
+
+esp_err_t WebServerAdapter::rejectOta(PsychicRequest *request, PsychicResponse *response) const noexcept
+{
+	ports::WebAuthorization authorization{};
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	return sendError(response, domain::ErrorCode::Unsupported);
+}
+
 esp_err_t WebServerAdapter::startWifiScan(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization)) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
 	app::WebApplicationRequest operation{};
 	operation.type = app::WebRequestType::WifiScan;
 	operation.operationId = esp_random();
@@ -1007,37 +1177,40 @@ esp_err_t WebServerAdapter::startWifiScan(PsychicRequest *request, PsychicRespon
 esp_err_t WebServerAdapter::saveWifiProfile(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization)) return sendUnauthorized(response);
-	if (dependencies_.wifiManagement == nullptr || request->contentLength() > maximumFrameBytes || request->loadBody() != ESP_OK)
-		return sendUnavailable(response, "wifi.unavailable");
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.wifiManagement == nullptr) return sendError(response, domain::ErrorCode::NetworkError);
+	if (request->contentLength() > maximumFrameBytes || request->loadBody() != ESP_OK)
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	std::uint8_t index{};
-	if (!parseProfileIndex(boundedText(request->pathCStr(), 128), {}, index)) return sendJson(response, 404, "{\"error\":{\"code\":\"wifi.profile_not_found\",\"message\":\"Wi-Fi profile not found.\"}}");
+	if (!parseProfileIndex(boundedText(request->pathCStr(), 128), {}, index)) return sendError(response, domain::ErrorCode::NotFound);
 	JsonDocument document;
 	if (deserializeJson(document, request->bodyCStr()) != DeserializationError::Ok || !document["enabled"].is<bool>() ||
-		!document["expectedGeneration"].is<std::uint32_t>()) return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid_json\",\"message\":\"Invalid Wi-Fi profile.\"}}");
+		!document["expectedGeneration"].is<std::uint32_t>()) return sendError(response, domain::ErrorCode::InvalidArgument);
 	app::WifiProfilePatch patch{};
 	patch.index = index;
 	patch.enabled = document["enabled"];
 	patch.expectedGeneration = document["expectedGeneration"];
-	if (!copyJsonText(document["ssid"], patch.ssid)) return sendJson(response, 422, "{\"error\":{\"code\":\"wifi.invalid_ssid\",\"message\":\"Invalid SSID.\"}}");
+	if (!copyJsonText(document["ssid"], patch.ssid)) return sendError(response, domain::ErrorCode::ConfigurationError);
 	if (document["clearPassphrase"] | false) patch.passphraseUpdate = app::WifiSecretUpdate::Clear;
 	else if (!document["passphrase"].isNull())
 	{
 		patch.passphraseUpdate = app::WifiSecretUpdate::Replace;
-		if (!copyJsonText(document["passphrase"], patch.passphrase)) return sendJson(response, 422, "{\"error\":{\"code\":\"wifi.invalid_passphrase\",\"message\":\"Invalid passphrase.\"}}");
+		if (!copyJsonText(document["passphrase"], patch.passphrase)) return sendError(response, domain::ErrorCode::ConfigurationError);
 	}
 	const auto ipv4 = document["ipv4"];
 	const auto *mode = ipv4["mode"].as<const char *>();
-	if (mode == nullptr) return sendJson(response, 422, "{\"error\":{\"code\":\"wifi.invalid_ipv4\",\"message\":\"Invalid IPv4 configuration.\"}}");
+	if (mode == nullptr) return sendError(response, domain::ErrorCode::ConfigurationError);
 	if (std::strcmp(mode, "dhcp") == 0) patch.ipv4.mode = domain::IpMode::Dhcp;
 	else if (std::strcmp(mode, "static") == 0)
 	{
 		patch.ipv4.mode = domain::IpMode::Static;
 		if (!parseIpv4(ipv4["address"], patch.ipv4.address) || !parseIpv4(ipv4["subnetMask"], patch.ipv4.subnetMask) ||
 			!parseIpv4(ipv4["gateway"], patch.ipv4.gateway) || !parseIpv4(ipv4["dns"], patch.ipv4.dns))
-			return sendJson(response, 422, "{\"error\":{\"code\":\"wifi.invalid_ipv4\",\"message\":\"Invalid IPv4 configuration.\"}}");
+			return sendError(response, domain::ErrorCode::ConfigurationError);
 	}
-	else return sendJson(response, 422, "{\"error\":{\"code\":\"wifi.invalid_ipv4\",\"message\":\"Invalid IPv4 configuration.\"}}");
+	else return sendError(response, domain::ErrorCode::ConfigurationError);
 	app::WebApplicationRequest operation{};
 	operation.type = app::WebRequestType::WifiSaveProfile;
 	operation.operationId = esp_random();
@@ -1050,14 +1223,17 @@ esp_err_t WebServerAdapter::saveWifiProfile(PsychicRequest *request, PsychicResp
 esp_err_t WebServerAdapter::removeWifiProfile(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization)) return sendUnauthorized(response);
-	if (dependencies_.wifiManagement == nullptr || request->contentLength() > maximumFrameBytes || request->loadBody() != ESP_OK)
-		return sendUnavailable(response, "wifi.unavailable");
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.wifiManagement == nullptr) return sendError(response, domain::ErrorCode::NetworkError);
+	if (request->contentLength() > maximumFrameBytes || request->loadBody() != ESP_OK)
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	std::uint8_t index{};
 	JsonDocument document;
 	if (!parseProfileIndex(boundedText(request->pathCStr(), 128), {}, index) ||
 		deserializeJson(document, request->bodyCStr()) != DeserializationError::Ok || !document["expectedGeneration"].is<std::uint32_t>())
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid\",\"message\":\"Invalid profile removal.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	app::WebApplicationRequest operation{};
 	operation.type = app::WebRequestType::WifiRemoveProfile;
 	operation.operationId = esp_random();
@@ -1071,14 +1247,17 @@ esp_err_t WebServerAdapter::removeWifiProfile(PsychicRequest *request, PsychicRe
 esp_err_t WebServerAdapter::moveWifiProfile(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization)) return sendUnauthorized(response);
-	if (dependencies_.wifiManagement == nullptr || request->contentLength() > maximumFrameBytes || request->loadBody() != ESP_OK)
-		return sendUnavailable(response, "wifi.unavailable");
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.wifiManagement == nullptr) return sendError(response, domain::ErrorCode::NetworkError);
+	if (request->contentLength() > maximumFrameBytes || request->loadBody() != ESP_OK)
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	std::uint8_t index{};
 	JsonDocument document;
 	if (!parseProfileIndex(boundedText(request->pathCStr(), 128), "/move", index) ||
 		deserializeJson(document, request->bodyCStr()) != DeserializationError::Ok || !document["toIndex"].is<std::uint8_t>() ||
-		!document["expectedGeneration"].is<std::uint32_t>()) return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid\",\"message\":\"Invalid profile move.\"}}");
+		!document["expectedGeneration"].is<std::uint32_t>()) return sendError(response, domain::ErrorCode::InvalidArgument);
 	app::WebApplicationRequest operation{};
 	operation.type = app::WebRequestType::WifiMoveProfile;
 	operation.operationId = esp_random();
@@ -1093,9 +1272,11 @@ esp_err_t WebServerAdapter::moveWifiProfile(PsychicRequest *request, PsychicResp
 esp_err_t WebServerAdapter::connectWifiProfile(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization)) return sendUnauthorized(response);
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
 	std::uint8_t index{};
-	if (!parseProfileIndex(boundedText(request->pathCStr(), 128), "/connect", index)) return sendJson(response, 404, "{\"error\":{\"code\":\"wifi.profile_not_found\",\"message\":\"Wi-Fi profile not found.\"}}");
+	if (!parseProfileIndex(boundedText(request->pathCStr(), 128), "/connect", index)) return sendError(response, domain::ErrorCode::NotFound);
 	const auto nowMs = millis();
 	app::WebApplicationRequest operation{};
 	operation.type = app::WebRequestType::WifiConnectProfile;
@@ -1109,16 +1290,19 @@ esp_err_t WebServerAdapter::connectWifiProfile(PsychicRequest *request, PsychicR
 esp_err_t WebServerAdapter::saveRecoveryAp(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization)) return sendUnauthorized(response);
-	if (dependencies_.wifiManagement == nullptr || request->contentLength() > maximumFrameBytes || request->loadBody() != ESP_OK)
-		return sendUnavailable(response, "wifi.unavailable");
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationWrite, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.wifiManagement == nullptr) return sendError(response, domain::ErrorCode::NetworkError);
+	if (request->contentLength() > maximumFrameBytes || request->loadBody() != ESP_OK)
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	JsonDocument document;
 	domain::RecoveryApConfiguration configuration{};
 	if (deserializeJson(document, request->bodyCStr()) != DeserializationError::Ok || !document["enabled"].is<bool>() ||
 		!document["channel"].is<std::uint8_t>() || !document["timeoutMs"].is<std::uint32_t>() ||
 		!document["remainActiveWhileOffline"].is<bool>() || !document["expectedGeneration"].is<std::uint32_t>() ||
 		!copyJsonText(document["ssidPrefix"], configuration.ssidPrefix))
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid\",\"message\":\"Invalid recovery access point configuration.\"}}");
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	configuration.enabled = document["enabled"];
 	configuration.channel = document["channel"];
 	configuration.timeoutMs = document["timeoutMs"];
@@ -1142,41 +1326,46 @@ esp_err_t WebServerAdapter::sendWifiMutationResult(PsychicRequest *request,
 		dependencies_.networkControl.applyCommittedConfiguration(millis());
 		return sendWifi(request, response);
 	}
-	if (result == app::WifiManagementResult::GenerationConflict) return sendJson(response, 409, "{\"error\":{\"code\":\"configuration.generation_conflict\",\"message\":\"Configuration changed; refresh and retry.\"}}");
-	if (result == app::WifiManagementResult::InvalidIndex) return sendJson(response, 404, "{\"error\":{\"code\":\"wifi.profile_not_found\",\"message\":\"Wi-Fi profile not found.\"}}");
-	if (result == app::WifiManagementResult::InvalidConfiguration) return sendJson(response, 422, "{\"error\":{\"code\":\"wifi.invalid_configuration\",\"message\":\"Invalid Wi-Fi configuration.\"}}");
-	return sendUnavailable(response, "configuration.persistence_failure");
+	return sendError(response, app::errorCode(result).value_or(domain::ErrorCode::InternalError));
 }
 
 esp_err_t WebServerAdapter::submitRelayCommand(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::RelayCommand, true, authorization)) return sendUnauthorized(response);
-	if (dependencies_.switchingPolicy == nullptr || dependencies_.commandTracker == nullptr ||
-		request->contentLength() > maximumFrameBytes || request->loadBody() != ESP_OK) return sendUnavailable(response, "command.unavailable");
+	const auto authorizationResult = authorize(request, ports::WebPermission::RelayCommand, true, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.switchingPolicy == nullptr) return sendError(response, domain::ErrorCode::HardwareError);
+	if (dependencies_.commandTracker == nullptr) return sendError(response, domain::ErrorCode::InternalError);
+	if (request->contentLength() > maximumFrameBytes || request->loadBody() != ESP_OK)
+		return sendError(response, domain::ErrorCode::InvalidArgument);
 	const auto path = boundedText(request->pathCStr(), 96);
-	const auto prefix = std::string_view{"/api/v1/relays/"};
-	if (path.size() <= prefix.size() || path.substr(0, prefix.size()) != prefix) return sendUnavailable(response, "command.invalid_channel");
-	const auto channel = static_cast<std::uint8_t>(path[prefix.size()] - '0');
-	if (channel >= domain::relayChannelCount) return sendJson(response, 404, "{\"error\":{\"code\":\"relay.not_found\",\"message\":\"Relay not found.\"}}");
+	constexpr std::string_view prefix{api_v1::route::relaysPrefix};
+	constexpr std::string_view commandSuffix{"/commands"};
+	if (path.size() <= prefix.size() || path.substr(0, prefix.size()) != prefix)
+		return sendError(response, domain::ErrorCode::NotFound);
+	const auto relayPath = path.substr(prefix.size());
+	if (relayPath.size() != 1U && (relayPath.size() != 1U + commandSuffix.size() ||
+		relayPath.substr(1U) != commandSuffix))
+		return sendError(response, domain::ErrorCode::NotFound);
+	if (relayPath.front() < '0' || relayPath.front() > '9')
+		return sendError(response, domain::ErrorCode::NotFound);
+	const auto channel = static_cast<std::uint8_t>(relayPath.front() - '0');
+	if (channel >= domain::relayChannelCount) return sendError(response, domain::ErrorCode::NotFound);
 	JsonDocument document;
 	if (deserializeJson(document, request->bodyCStr()) != DeserializationError::Ok ||
-		!document["expectedSequence"].is<std::uint32_t>()) return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid_json\",\"message\":\"Invalid JSON.\"}}");
+		!document["expectedSequence"].is<std::uint32_t>()) return sendError(response, domain::ErrorCode::InvalidArgument);
 	domain::RelayAction action{};
-	if (!parseRelayAction(document["action"], action)) return sendJson(response, 422, "{\"error\":{\"code\":\"relay.invalid_action\",\"message\":\"Invalid relay action.\"}}");
+	if (!parseRelayAction(document["action"], action)) return sendError(response, domain::ErrorCode::InvalidArgument);
 	const auto *idempotencyKey = request->headerCStr("Idempotency-Key");
-	if (idempotencyKey == nullptr) return sendJson(response, 400, "{\"error\":{\"code\":\"request.idempotency_key_required\",\"message\":\"Idempotency key required.\"}}");
+	if (idempotencyKey == nullptr) return sendError(response, domain::ErrorCode::InvalidArgument);
 	const auto correlationId = esp_random();
 	app::WebTrackedCommand tracked{};
 	const auto beginResult = dependencies_.commandTracker->begin(authorization.sessionId, idempotencyKey, {channel}, action,
 		document["expectedSequence"], correlationId, millis(), tracked);
 	if (beginResult == app::WebCommandBeginResult::Duplicate) return sendCommandResult(response, tracked);
-	if (beginResult == app::WebCommandBeginResult::IdempotencyMismatch)
-		return sendJson(response, 409, "{\"error\":{\"code\":\"web.idempotency_mismatch\",\"message\":\"Idempotency key was reused for a different request.\"}}");
-	if (beginResult == app::WebCommandBeginResult::CapacityFull)
-		return sendJson(response, 429, "{\"error\":{\"code\":\"web.command_capacity\",\"message\":\"Command result capacity is full.\"}}");
 	if (beginResult != app::WebCommandBeginResult::Accepted)
-		return sendJson(response, 400, "{\"error\":{\"code\":\"request.invalid_idempotency_key\",\"message\":\"Invalid idempotency key.\"}}");
+		return sendError(response, app::errorCode(beginResult).value_or(domain::ErrorCode::InternalError));
 	app::WebApplicationRequest operation{};
 	operation.type = app::WebRequestType::RelayCommand;
 	operation.operationId = correlationId;
@@ -1209,19 +1398,21 @@ esp_err_t WebServerAdapter::sendCommandResult(PsychicResponse *response,
 esp_err_t WebServerAdapter::getCommandResult(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::RelayRead, false, authorization)) return sendUnauthorized(response);
-	if (dependencies_.commandTracker == nullptr) return sendUnavailable(response, "command.unavailable");
+	const auto authorizationResult = authorize(request, ports::WebPermission::RelayRead, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.commandTracker == nullptr) return sendError(response, domain::ErrorCode::InternalError);
 	const auto path = boundedText(request->pathCStr(), 96);
-	constexpr std::string_view prefix{"/api/v1/commands/"};
+	constexpr std::string_view prefix{api_v1::route::commandsPrefix};
 	unsigned long correlationId{};
 	char trailing{};
 	if (path.size() <= prefix.size() || path.substr(0, prefix.size()) != prefix ||
 		std::sscanf(path.data() + prefix.size(), "%lu%c", &correlationId, &trailing) != 1)
-		return sendJson(response, 404, "{\"error\":{\"code\":\"command.not_found\",\"message\":\"Command result not found.\"}}");
+		return sendError(response, domain::ErrorCode::NotFound);
 	app::WebTrackedCommand tracked{};
 	if (!dependencies_.commandTracker->findByCorrelation(authorization.sessionId,
 		static_cast<std::uint32_t>(correlationId), tracked))
-		return sendJson(response, 404, "{\"error\":{\"code\":\"command.not_found\",\"message\":\"Command result not found.\"}}");
+		return sendError(response, domain::ErrorCode::NotFound);
 	return sendCommandResult(response, tracked);
 }
 
@@ -1230,7 +1421,7 @@ esp_err_t WebServerAdapter::enqueueOperation(PsychicResponse *response,
 {
 	if (dependencies_.requestQueue == nullptr || operation.operationId == 0 ||
 		!dependencies_.requestQueue->enqueue(operation))
-		return sendJson(response, 429, "{\"error\":{\"code\":\"web.request_queue_full\",\"message\":\"Request queue is full.\"}}");
+		return sendError(response, domain::ErrorCode::Busy);
 	char body[160]{};
 	std::snprintf(body, sizeof(body), "{\"operationId\":\"%lu\",\"status\":\"pending\"}",
 		static_cast<unsigned long>(operation.operationId));
@@ -1240,18 +1431,20 @@ esp_err_t WebServerAdapter::enqueueOperation(PsychicResponse *response,
 esp_err_t WebServerAdapter::getOperationResult(PsychicRequest *request, PsychicResponse *response) noexcept
 {
 	ports::WebAuthorization authorization{};
-	if (!authorize(request, ports::WebPermission::ConfigurationRead, false, authorization)) return sendUnauthorized(response);
-	if (dependencies_.requestQueue == nullptr) return sendUnavailable(response, "operation.unavailable");
+	const auto authorizationResult = authorize(request, ports::WebPermission::ConfigurationRead, false, authorization);
+	if (authorizationResult != ports::WebAuthorizationResult::Authorized)
+		return sendAuthorizationFailure(response, authorizationResult);
+	if (dependencies_.requestQueue == nullptr) return sendError(response, domain::ErrorCode::InternalError);
 	const auto path = boundedText(request->pathCStr(), 96);
-	constexpr std::string_view prefix{"/api/v1/operations/"};
+	constexpr std::string_view prefix{api_v1::route::operationsPrefix};
 	unsigned long operationId{};
 	char trailing{};
 	if (path.size() <= prefix.size() || path.substr(0, prefix.size()) != prefix ||
 		std::sscanf(path.data() + prefix.size(), "%lu%c", &operationId, &trailing) != 1)
-		return sendJson(response, 404, "{\"error\":{\"code\":\"operation.not_found\",\"message\":\"Operation not found.\"}}");
+		return sendError(response, domain::ErrorCode::NotFound);
 	app::WebOperationResult result{};
 	if (!dependencies_.requestQueue->findResult(authorization.sessionId, static_cast<std::uint32_t>(operationId), result))
-		return sendJson(response, 404, "{\"error\":{\"code\":\"operation.not_found\",\"message\":\"Operation not found.\"}}");
+		return sendError(response, domain::ErrorCode::NotFound);
 	const auto *status = result.status == app::WebOperationStatus::Pending ? "pending" :
 		result.status == app::WebOperationStatus::Applied ? "applied" :
 		result.status == app::WebOperationStatus::Conflict ? "conflict" :
@@ -1264,7 +1457,7 @@ esp_err_t WebServerAdapter::getOperationResult(PsychicRequest *request, PsychicR
 
 esp_err_t WebServerAdapter::sendStatic(PsychicRequest *, PsychicResponse *response, const char *path, const char *contentType, const char *cacheControl) const noexcept
 {
-	if (!LittleFS.exists(path)) return sendUnavailable(response, "assets.unavailable");
+	if (!LittleFS.exists(path)) return sendError(response, domain::ErrorCode::StorageError);
 	addSecurityHeaders(response);
 	response->addHeader("Cache-Control", cacheControl);
 	PsychicFileResponse file{response, LittleFS, String(path), String(contentType)};
@@ -1278,7 +1471,7 @@ esp_err_t WebServerAdapter::sendManifestAsset(PsychicRequest *request, PsychicRe
 		return path == boundedText(entry.url.data(), entry.url.size());
 	});
 	if (asset == staticAssets_.begin() + staticAssetCount_)
-		return sendJson(response, 404, "{\"error\":{\"code\":\"asset.not_found\",\"message\":\"Asset not found.\"}}");
+		return sendError(response, domain::ErrorCode::NotFound);
 	const auto *acceptEncoding = request->headerCStr("Accept-Encoding");
 	const auto useGzip = acceptEncoding != nullptr && std::strstr(acceptEncoding, "gzip") != nullptr &&
 		LittleFS.exists(asset->gzipFile.data());
@@ -1297,14 +1490,26 @@ esp_err_t WebServerAdapter::sendIndex(PsychicRequest *request, PsychicResponse *
 
 esp_err_t WebServerAdapter::sendUnauthorized(PsychicResponse *response) const noexcept
 {
-	return sendJson(response, 401, "{\"error\":{\"code\":\"session.unauthorized\",\"message\":\"Authentication required.\"}}");
+	return sendError(response, domain::ErrorCode::Unauthorized);
 }
 
-esp_err_t WebServerAdapter::sendUnavailable(PsychicResponse *response, const char *code) const noexcept
+esp_err_t WebServerAdapter::sendAuthorizationFailure(PsychicResponse *response,
+	const ports::WebAuthorizationResult result) const noexcept
 {
+	const auto error = app::errorCode(result).value_or(domain::ErrorCode::InternalError);
+	return sendError(response, error);
+}
+
+esp_err_t WebServerAdapter::sendError(PsychicResponse *response, const domain::ErrorCode error) const noexcept
+{
+	const auto representation = represent(error);
+	if (error == domain::ErrorCode::Busy) response->addHeader("Retry-After", "1");
 	char body[192]{};
-	std::snprintf(body, sizeof(body), "{\"error\":{\"code\":\"%s\",\"message\":\"Service unavailable.\"}}", code);
-	return sendJson(response, 503, body);
+	std::snprintf(body, sizeof(body), "{\"error\":{\"code\":\"%s\",\"message\":\"%s\"}}",
+		representation.code, representation.message);
+	addSecurityHeaders(response);
+	response->addHeader("Cache-Control", "no-store");
+	return response->send(representation.status, jsonContentType, body);
 }
 
 void WebServerAdapter::onWebSocketOpen(PsychicWebSocketClient *client) noexcept
@@ -1352,9 +1557,9 @@ esp_err_t WebServerAdapter::onWebSocketFrame(PsychicWebSocketRequest *request, h
 	++state->messagesInWindow;
 	JsonDocument document;
 	if (deserializeJson(document, frame->payload, frame->len) != DeserializationError::Ok)
-		return request->reply("{\"version\":1,\"type\":\"protocol.error\",\"sequence\":0,\"payload\":{\"code\":\"protocol.invalid_message\"}}");
+		return sendWebSocketError(request, domain::ErrorCode::InvalidArgument);
 	if (document["version"].as<int>() != 1)
-		return request->reply("{\"version\":1,\"type\":\"protocol.error\",\"sequence\":0,\"payload\":{\"code\":\"protocol.version_mismatch\"}}");
+		return sendWebSocketError(request, domain::ErrorCode::ProtocolError);
 	const auto type = document["type"].as<const char *>();
 	if (type != nullptr && std::strcmp(type, "ping") == 0)
 		return request->reply("{\"version\":1,\"type\":\"pong\",\"sequence\":0,\"payload\":{}}");
@@ -1375,9 +1580,9 @@ esp_err_t WebServerAdapter::onWebSocketFrame(PsychicWebSocketRequest *request, h
 			const auto beginResult = dependencies_.commandTracker->begin(state->sessionId, requestId, {channel}, action,
 				expectedSequence, correlationId, nowMs, tracked);
 			if (beginResult == app::WebCommandBeginResult::IdempotencyMismatch)
-				return request->reply("{\"version\":1,\"type\":\"protocol.error\",\"sequence\":0,\"payload\":{\"code\":\"web.idempotency_mismatch\"}}");
+				return sendWebSocketError(request, domain::ErrorCode::ConfigurationError);
 			if (beginResult == app::WebCommandBeginResult::CapacityFull)
-				return request->reply("{\"version\":1,\"type\":\"protocol.error\",\"sequence\":0,\"payload\":{\"code\":\"web.command_capacity\"}}");
+				return sendWebSocketError(request, domain::ErrorCode::Busy);
 			if (beginResult == app::WebCommandBeginResult::Accepted)
 			{
 				app::WebApplicationRequest operation{};
@@ -1394,7 +1599,8 @@ esp_err_t WebServerAdapter::onWebSocketFrame(PsychicWebSocketRequest *request, h
 			}
 			else if (beginResult != app::WebCommandBeginResult::Duplicate)
 			{
-				return request->reply("{\"version\":1,\"type\":\"protocol.error\",\"sequence\":0,\"payload\":{\"code\":\"protocol.invalid_message\"}}");
+				return sendWebSocketError(request,
+					app::errorCode(beginResult).value_or(domain::ErrorCode::InternalError));
 			}
 			char message[320]{};
 			std::snprintf(message, sizeof(message), "{\"version\":1,\"type\":\"relay.commandResult\",\"sequence\":0,\"requestId\":\"%s\",\"payload\":{\"correlationId\":\"%lu\",\"channel\":%u,\"result\":\"%s\"}}",
@@ -1402,7 +1608,7 @@ esp_err_t WebServerAdapter::onWebSocketFrame(PsychicWebSocketRequest *request, h
 			return request->reply(message);
 		}
 	}
-	return request->reply("{\"version\":1,\"type\":\"protocol.error\",\"sequence\":0,\"payload\":{\"code\":\"protocol.unsupported_message\"}}");
+	return sendWebSocketError(request, domain::ErrorCode::Unsupported);
 }
 
 void WebServerAdapter::publishEvents(const std::uint32_t nowMs) noexcept

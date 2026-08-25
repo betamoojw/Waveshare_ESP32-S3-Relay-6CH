@@ -24,6 +24,7 @@ enum class FaultCode : std::uint8_t
 	RepeatedBoot,
 	ResourceExhaustion,
 	FileSystemFailure,
+	SecurityPolicyFailure,
 	Count
 };
 

@@ -1,9 +1,12 @@
 #include "application.h"
-
-#include "../adapters/bsp/waveshare_esp32s3_relay6ch.h"
+#include "../adapters/logging/logger_adapter.h"
+#include "../domain/version_compatibility.h"
 
 #include <Arduino.h>
+#include <esp_mac.h>
 #include <esp_system.h>
+#include <esp_flash_encrypt.h>
+#include <esp_secure_boot.h>
 
 #include <string_view>
 
@@ -17,14 +20,12 @@ constexpr std::uint32_t buttonUpdateIntervalMs{10};
 constexpr std::uint32_t cliPollIntervalMs{10};
 constexpr std::uint32_t indicatorUpdateIntervalMs{20};
 constexpr std::uint32_t diagnosticsUpdateIntervalMs{1000};
+constexpr std::uint32_t diagnosticCounterFlushIntervalMs{60000};
+constexpr std::uint32_t minimumFreeInternalHeapBytes{64U * 1024U};
+constexpr std::uint32_t minimumLargestInternalHeapBlockBytes{32U * 1024U};
 constexpr std::size_t maximumSerialInputBytesPerUpdate{64};
 constexpr std::uint32_t controlledRestartDrainMs{500};
-
-#ifdef FIRMWARE_VERSION
-constexpr std::string_view firmwareVersion{FIRMWARE_VERSION};
-#else
-constexpr std::string_view firmwareVersion{"1.00"};
-#endif
+constexpr std::string_view productName{"Switch Actuator 6CH"};
 
 #ifdef PIOENV
 constexpr std::string_view buildId{PIOENV};
@@ -32,27 +33,26 @@ constexpr std::string_view buildId{PIOENV};
 constexpr std::string_view buildId{"local"};
 #endif
 
-#ifdef ENABLE_MUTATING_CLI_COMMANDS
-constexpr bool mutatingCliCommandsEnabled{true};
-#else
-constexpr bool mutatingCliCommandsEnabled{false};
-#endif
 }
 
 Application::Application() noexcept
 	: lifecycle_{diagnostics_.lifecycleEventSink()},
-	  relayOutput_{adapters::bsp::waveshareEsp32S3Relay6Ch},
-	  relayService_{relayOutput_.port(), diagnostics_.relayEventSink(), commandArbiter_},
+	  relayOutput_{hal::board()},
+	  relayService_{relayOutput_.hal(), diagnostics_.relayEventSink(), commandArbiter_},
 	  switchingPolicy_{commandQueue_, commandArbiter_},
 	  sceneService_{switchingPolicy_, relayService_},
 	  relayTimerService_{switchingPolicy_},
 	  defaultConfigurationSource_{adapters::configuration::embeddedDefaultConfigurationJson()},
 	  configurationService_{settingsStore_.port()},
 	  wifiManagementService_{configurationService_},
-	  network_{adapters::bsp::waveshareEsp32S3Relay6Ch, configurationService_, wifiManagementService_, Serial},
-	  statusIndicator_{adapters::bsp::waveshareEsp32S3Relay6Ch},
-	  button_{adapters::bsp::waveshareEsp32S3Relay6Ch, handleButtonEvent, this},
-	  knx_{{&switchingPolicy_, &relayService_, &diagnostics_, ports::ClockPort{monotonicMilliseconds, this}, network_.statusPort()}},
+	  network_{hal::board(), configurationService_, wifiManagementService_, wifiAdapter_, ethernetAdapter_.port(), Serial},
+	  networkHal_{network_.hal()},
+	  rgbLedHardware_{hal::board()},
+	  buzzerHardware_{hal::board()},
+	  statusIndicator_{rgbLedHardware_.hal(), buzzerHardware_.hal()},
+	  buttonHardware_{hal::board()},
+	  button_{buttonHardware_.hal(), handleButtonEvent, this},
+	  knx_{{&switchingPolicy_, &relayService_, &diagnostics_, ports::ClockPort{monotonicMilliseconds, this}, networkHal_.status}},
 	  modbusConfigurationGateway_{{&configurationService_,
 		&lifecycle_,
 		&diagnostics_,
@@ -64,12 +64,13 @@ Application::Application() noexcept
 		&diagnostics_,
 		extendModbusSnapshot,
 		this,
-		adapters::modbus::ModbusConfigurationGateway::handle,
-		&modbusConfigurationGateway_}},
-	  modbusSerialTransport_{Serial1, adapters::bsp::waveshareEsp32S3Relay6Ch},
-	  modbusRtu_{{adapters::modbus::Esp32ModbusSerialTransport::read,
-		adapters::modbus::Esp32ModbusSerialTransport::write,
-		&modbusSerialTransport_,
+		handleModbusNonRelayWrite,
+		this}},
+	  modbusSerialTransport_{Serial1, hal::board()},
+	  rs485Hal_{modbusSerialTransport_.hal()},
+	  modbusRtu_{{rs485Hal_.read,
+		rs485Hal_.write,
+		rs485Hal_.context,
 		adapters::modbus::ModbusApplicationGateway::provideSnapshot,
 		&modbusApplicationGateway_,
 		adapters::modbus::ModbusApplicationGateway::handleWriteBatch,
@@ -82,19 +83,24 @@ Application::Application() noexcept
 		&diagnostics_,
 		&configurationService_,
 		&webSecurityService_,
+		&serviceMode_,
+		&hal::board(),
 		defaultConfigurationSource_.filePort(),
 		&statusIndicator_,
 		&button_,
 		&network_,
 		modbusRtu_.controlPort(),
 		ports::ClockPort{monotonicMilliseconds, this},
-		mutatingCliCommandsEnabled}}
+		domain::deploymentProfile}}
 {
 }
 
 ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) noexcept
 {
+	adapters::logging::LoggerAdapter::instance().initialize(domain::deploymentProfile);
+	LOG_INFO("application", "startup profile=%s", domain::deploymentProfileName(domain::deploymentProfile).data());
 	initialized_ = false;
+	static_cast<void>(serviceMode_.exit());
 	modbusAvailable_ = false;
 	cliAvailable_ = false;
 	webAvailable_ = false;
@@ -104,18 +110,28 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	webRequestQueue_.clear();
 	relayTimerService_.cancelAll();
 	sceneService_.disable();
-	if (resetCategory() == domain::ResetCategory::Watchdog)
+	if (!hal::supportsRelayCount(hal::board(), domain::relayChannelCount))
+	{
+		LOG_FATAL("application", "unsupported board relay count");
+		return ApplicationInitializeResult::UnsupportedBoard;
+	}
+	const auto startupResetCategory = resetCategory();
+	LOG_DEBUG("application", "reset category=%u", static_cast<unsigned int>(startupResetCategory));
+	if (startupResetCategory == domain::ResetCategory::Watchdog)
 	{
 		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::WatchdogReset,
 			domain::FaultSeverity::Warning,
 			nowMs));
 	}
-	static_cast<void>(diagnostics_.setIdentity(firmwareVersion,
-		buildId,
-		adapters::bsp::waveshareEsp32S3Relay6Ch.model,
-		adapters::bsp::waveshareEsp32S3Relay6Ch.hardwareRevision));
+	else if (startupResetCategory == domain::ResetCategory::Brownout)
+	{
+		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::BrownoutReset,
+			domain::FaultSeverity::Warning,
+			nowMs));
+	}
 	if (lifecycle_.initialize(nowMs) != LifecycleResult::Applied)
 	{
+		LOG_FATAL("lifecycle", "initialization failed");
 		return ApplicationInitializeResult::LifecycleFailure;
 	}
 	if (relayOutput_.initialize() != adapters::bsp::RelayOutputResult::Applied)
@@ -124,38 +140,85 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 			domain::FaultSeverity::Critical,
 			nowMs));
 		static_cast<void>(lifecycle_.enterFault(LifecycleReason::CriticalFault, nowMs));
+		LOG_FATAL("relay", "output initialization failed");
 		return ApplicationInitializeResult::RelayOutputFailure;
 	}
+#if SWITCH_ACTUATOR_REQUIRE_SECURE_BOOT || SWITCH_ACTUATOR_REQUIRE_FLASH_ENCRYPTION
+	const auto secureBootReady = !SWITCH_ACTUATOR_REQUIRE_SECURE_BOOT || esp_secure_boot_enabled();
+	const auto flashEncryptionReady = !SWITCH_ACTUATOR_REQUIRE_FLASH_ENCRYPTION || esp_flash_encryption_enabled();
+	if (!secureBootReady || !flashEncryptionReady)
+	{
+		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::SecurityPolicyFailure,
+			domain::FaultSeverity::Critical, nowMs));
+		static_cast<void>(lifecycle_.enterFault(LifecycleReason::CriticalFault, nowMs));
+		LOG_FATAL("security", "required hardware security state missing");
+		return ApplicationInitializeResult::SecurityPolicyFailure;
+	}
+#endif
 	if (statusIndicator_.initialize() != adapters::indicators::IndicatorResult::Applied)
 	{
+		LOG_ERROR("indicator", "initialization failed");
 		return ApplicationInitializeResult::IndicatorFailure;
 	}
 	if (lifecycle_.beginConfiguration(nowMs) != LifecycleResult::Applied)
 	{
+		LOG_FATAL("lifecycle", "configuration transition failed");
 		return ApplicationInitializeResult::LifecycleFailure;
 	}
 
 	const auto fileSystemReady =
 		defaultConfigurationSource_.initialize() == adapters::filesystem::LittleFsInitializeResult::Initialized;
 	const auto nvsReady = settingsStore_.initialize() == adapters::nvs::NvsInitializeResult::Initialized;
+	const auto diagnosticCounters = settingsStore_.beginDiagnosticCounters(startupResetCategory);
+	diagnostics_.setPersistentCounters(diagnosticCounters.counters);
+	diagnostics_.updateBoot(diagnosticCounters.counters.bootCount, startupResetCategory);
+	lastDiagnosticCounterFlushAtMs_ = nowMs;
+	if (!diagnosticCounters.persisted) diagnostics_.recordStorageFailure();
 	configurationService_.setDefaultSource(defaultConfigurationSource_.port());
 	static_cast<void>(configurationService_.initialize());
 	const auto configurationValid = configurationService_.hasValidActiveConfiguration();
+	if (configurationValid)
+	{
+		std::array<std::uint8_t, domain::macAddressSize> macAddress{};
+		if (esp_read_mac(macAddress.data(), ESP_MAC_BASE) == ESP_OK)
+		{
+			const auto &configuration = configurationService_.active();
+			const domain::DeviceIdentitySource source{
+				configuration.productId.value.data(),
+				productName,
+				hal::board().model,
+				hal::board().hardwareRevision,
+				domain::compatibility::firmware,
+				configuration.deviceSerial.data(),
+				configuration.deviceUuid,
+				macAddress,
+				configuration.manufacturingDate.iso8601.data(),
+				configuration.manufacturingBatch,
+			};
+			if (const auto identity = domain::makeDeviceIdentity(source))
+			{
+				static_cast<void>(diagnostics_.setIdentity(*identity, buildId));
+			}
+		}
+	}
 	const auto settingsLoadResult = configurationService_.lastLoadResult();
 	const auto persistenceHealthy = nvsReady && settingsLoadResult != ports::SettingsLoadResult::Corrupt &&
 										settingsLoadResult != ports::SettingsLoadResult::IoFailure;
+	diagnostics_.updateStorage(fileSystemReady, nvsReady, persistenceHealthy);
 	diagnostics_.updateConfiguration(configurationValid,
 		configurationService_.active().generation,
 		configurationService_.lastLoadResult(),
 		configurationService_.lastSaveResult());
 	if (!configurationValid)
 	{
+		LOG_WARNING("configuration", "active configuration invalid");
 		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::InvalidConfiguration,
 			domain::FaultSeverity::Warning,
 			nowMs));
 	}
 	if (!persistenceHealthy)
 	{
+		LOG_ERROR("storage", "settings persistence unavailable");
 		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::SettingsLoadFailure,
 			domain::FaultSeverity::Warning,
 			nowMs));
@@ -166,6 +229,7 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	}
 	if (!fileSystemReady)
 	{
+		LOG_ERROR("storage", "filesystem unavailable");
 		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::FileSystemFailure,
 			domain::FaultSeverity::Warning,
 			nowMs));
@@ -181,11 +245,13 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 			domain::FaultSeverity::Critical,
 			nowMs));
 		static_cast<void>(lifecycle_.enterFault(LifecycleReason::CriticalFault, nowMs));
+		LOG_FATAL("relay", "service initialization failed");
 		return ApplicationInitializeResult::ServiceFailure;
 	}
 	if (button_.initialize(nowMs) != adapters::button::ButtonInitializeResult::Initialized)
 	{
 		static_cast<void>(lifecycle_.enterFault(LifecycleReason::CriticalFault, nowMs));
+		LOG_ERROR("button", "initialization failed");
 		return ApplicationInitializeResult::ButtonFailure;
 	}
 	Serial.begin(115200);
@@ -216,13 +282,15 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	}
 	else
 	{
+		LOG_WARNING("modbus", "transport unavailable");
 		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::ModbusTransportError,
 			domain::FaultSeverity::Warning,
 			nowMs));
 	}
-	if (!applyRestorePlan(nowMs))
+	if (!applyRestorePlan(startupResetCategory, nowMs))
 	{
 		static_cast<void>(lifecycle_.enterFault(LifecycleReason::CriticalFault, nowMs));
+		LOG_FATAL("relay", "restore plan failed");
 		return ApplicationInitializeResult::ServiceFailure;
 	}
 
@@ -232,8 +300,8 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	lastCliPollAtMs_ = nowMs;
 	lastIndicatorUpdateAtMs_ = nowMs;
 	lastDiagnosticsUpdateAtMs_ = nowMs;
-	lastPublishedNetworkSequence_ = network_.statusPort().snapshot().sequence;
-	lastPublishedWifiScanSequence_ = network_.statusPort().snapshot().wifiScan.sequence;
+	lastPublishedNetworkSequence_ = networkHal_.status.snapshot().sequence;
+	lastPublishedWifiScanSequence_ = networkHal_.status.snapshot().wifiScan.sequence;
 	lastPublishedConfigurationGeneration_ = configurationService_.active().generation;
 	diagnosticsEventSequence_ = 0;
 	restartPending_ = false;
@@ -245,6 +313,7 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 			configurationValid ? LifecycleReason::AdapterUnavailable : LifecycleReason::ConfigurationInvalid,
 			nowMs));
 		statusIndicator_.setBusDegraded(true);
+		LOG_WARNING("application", "initialized in degraded state");
 		if (watchdog_.initialize() == adapters::watchdog::WatchdogInitializeResult::RegistrationFailure)
 		{
 			handleWatchdogFailure(nowMs);
@@ -254,6 +323,7 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 	}
 
 	static_cast<void>(lifecycle_.enterOperational(nowMs));
+	LOG_INFO("application", "initialized operational");
 	if (watchdog_.initialize() == adapters::watchdog::WatchdogInitializeResult::RegistrationFailure)
 	{
 		handleWatchdogFailure(nowMs);
@@ -267,6 +337,10 @@ void Application::update(const std::uint32_t nowMs) noexcept
 	if (!initialized_)
 	{
 		return;
+	}
+	if (serviceMode_.update(nowMs))
+	{
+		statusIndicator_.setCommissioning(false);
 	}
 	static_cast<void>(relayTimerService_.update(nowMs));
 	processWebRequest(nowMs);
@@ -344,6 +418,10 @@ void Application::update(const std::uint32_t nowMs) noexcept
 	}
 	if (restartPending_ && nowMs - restartRequestedAtMs_ >= controlledRestartDrainMs)
 	{
+		flushDiagnosticCounters(nowMs, true);
+		webServer_.stop();
+		network_.shutdown();
+		modbusSerialTransport_.shutdown();
 		ESP.restart();
 	}
 }
@@ -391,7 +469,7 @@ bool Application::onButtonEvent(const adapters::button::ButtonEvent &event) noex
 		return true;
 	case adapters::button::ButtonEventType::CommissioningRequested:
 		statusIndicator_.setCommissioning(true);
-		cli_.setMaintenanceAuthorized(true);
+		static_cast<void>(serviceMode_.enterFromPhysicalPresence(event.occurredAtMs));
 		return true;
 	case adapters::button::ButtonEventType::FactoryResetArmed:
 		statusIndicator_.notifyCommand(adapters::indicators::CommandFeedback::Rejected, event.occurredAtMs);
@@ -405,7 +483,7 @@ bool Application::onButtonEvent(const adapters::button::ButtonEvent &event) noex
 
 bool Application::performFactoryReset(const std::uint32_t nowMs) noexcept
 {
-	cli_.setMaintenanceAuthorized(false);
+	static_cast<void>(serviceMode_.exit());
 	for (std::uint8_t channel = 0; channel < domain::relayChannelCount; ++channel)
 	{
 		const auto result = relayService_.setSafetyLockout(
@@ -421,7 +499,10 @@ bool Application::performFactoryReset(const std::uint32_t nowMs) noexcept
 	}
 
 	commandQueue_.clear();
-	if (webSecurityService_.erase() != ports::WebSecurityStoreResult::Applied)
+	relayTimerService_.cancelAll();
+	sceneService_.disable();
+	webServer_.stop();
+	if (webSecurityService_.eraseUsersPreservingIdentity() != ports::WebSecurityStoreResult::Applied)
 	{
 		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::SettingsSaveFailure,
 			domain::FaultSeverity::Warning, nowMs));
@@ -472,10 +553,10 @@ domain::ResetCategory Application::resetCategory() noexcept
 	}
 }
 
-bool Application::applyRestorePlan(const std::uint32_t nowMs) noexcept
+bool Application::applyRestorePlan(const domain::ResetCategory resetCategory, const std::uint32_t nowMs) noexcept
 {
 	domain::RelayRestorePlan plan{};
-	const domain::RelayRestoreContext context{resetCategory(), {}, false, 1, nowMs};
+	const domain::RelayRestoreContext context{domain::relaySafetyEventForReset(resetCategory), {}, 1, nowMs};
 	if (domain::makeRelayRestorePlan(configurationService_.active().relayChannels, context, plan) !=
 		domain::RelayRestorePlanResult::Planned)
 	{
@@ -541,7 +622,23 @@ void Application::processRelayCommand(const std::uint32_t nowMs) noexcept
 
 void Application::updateDiagnostics(const std::uint32_t nowMs) noexcept
 {
-	diagnostics_.updateRuntime(nowMs, ESP.getMinFreeHeap(), watchdog_.isHealthy());
+	const RuntimeDiagnostics runtime{ESP.getFreeHeap(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap(),
+		ESP.getPsramSize(), ESP.getFreePsram(), ESP.getMinFreePsram(), ESP.getCpuFreqMHz(),
+		static_cast<std::uint8_t>(ESP.getChipCores()), watchdog_.isHealthy()};
+	diagnostics_.updateRuntime(nowMs, runtime);
+	if (runtime.freeHeapBytes < minimumFreeInternalHeapBytes ||
+		runtime.largestFreeHeapBlockBytes < minimumLargestInternalHeapBlockBytes)
+	{
+		static_cast<void>(diagnostics_.recordFault(domain::FaultCode::ResourceExhaustion,
+			domain::FaultSeverity::Warning, nowMs));
+	}
+	else
+	{
+		static_cast<void>(diagnostics_.clearFault(domain::FaultCode::ResourceExhaustion));
+	}
+	diagnostics_.updateNetwork(networkHal_.status.snapshot());
+	diagnostics_.updateModbus(modbusAvailable_);
+	flushDiagnosticCounters(nowMs, false);
 	++diagnosticsEventSequence_;
 	webEventJournal_.publish({0, WebEventType::DiagnosticsChanged, 0, {0}, domain::RelayState::Off,
 		RelayCommandStatus::Accepted, RelayCommandReason::None, diagnosticsEventSequence_, nowMs});
@@ -549,7 +646,7 @@ void Application::updateDiagnostics(const std::uint32_t nowMs) noexcept
 
 void Application::publishWebStateEvents(const std::uint32_t nowMs) noexcept
 {
-	const auto &networkSnapshot = network_.statusPort().snapshot();
+	const auto &networkSnapshot = networkHal_.status.snapshot();
 	if (networkSnapshot.sequence != lastPublishedNetworkSequence_)
 	{
 		lastPublishedNetworkSequence_ = networkSnapshot.sequence;
@@ -578,11 +675,52 @@ std::uint32_t Application::monotonicMilliseconds(void *) noexcept
 	return millis();
 }
 
-bool Application::extendModbusSnapshot(void *, adapters::modbus::RegisterMapSnapshot &snapshot) noexcept
+bool Application::extendModbusSnapshot(void *const context, adapters::modbus::RegisterMapSnapshot &snapshot) noexcept
 {
-	snapshot.softwareVersion = 100;
-	snapshot.uartEncodedSettingsAvailable = false;
-	return true;
+	snapshot.softwareVersion = domain::compatibility::firmwareModbusRegister;
+	if (context == nullptr)
+	{
+		return false;
+	}
+	auto &application = *static_cast<Application *>(context);
+	const auto &configuration = application.configurationService_.active().modbus;
+	snapshot.uartEncodedSettingsAvailable =
+		adapters::modbus::ModbusRegisterMap::encodeUartSettings(configuration, snapshot.uartEncodedSettings);
+	const auto indicator = application.statusIndicator_.maintenanceState(application.diagnostics_.snapshot().uptimeMs);
+	snapshot.indicator = {indicator.red, indicator.green, indicator.blue, indicator.brightness, 0};
+	return snapshot.uartEncodedSettingsAvailable;
+}
+
+adapters::modbus::WriteBatchResult Application::handleModbusNonRelayWrite(
+	void *const context, const adapters::modbus::HoldingWriteBatch &batch) noexcept
+{
+	if (context == nullptr)
+	{
+		return domain::ErrorCode::InternalError;
+	}
+	auto &application = *static_cast<Application *>(context);
+	const auto nowMs = application.diagnostics_.snapshot().uptimeMs;
+	const auto &policy = application.configurationService_.active().indicators;
+	if (batch.kind == adapters::modbus::HoldingWriteKind::Indicator)
+	{
+		auto state = application.statusIndicator_.maintenanceState(nowMs);
+		if ((batch.indicator.updateMask & 0x01U) != 0) state.red = batch.indicator.red;
+		if ((batch.indicator.updateMask & 0x02U) != 0) state.green = batch.indicator.green;
+		if ((batch.indicator.updateMask & 0x04U) != 0) state.blue = batch.indicator.blue;
+		if ((batch.indicator.updateMask & 0x08U) != 0) state.brightness = batch.indicator.brightness;
+		const auto result = application.statusIndicator_.setMaintenanceColor(
+			state.red, state.green, state.blue, state.brightness, policy.maximumBrightness, nowMs);
+		return result == adapters::indicators::IndicatorResult::Applied
+			? adapters::modbus::WriteBatchResult{} : adapters::modbus::WriteBatchResult{domain::ErrorCode::HardwareError};
+	}
+	if (batch.kind == adapters::modbus::HoldingWriteKind::Buzzer)
+	{
+		const auto result = application.statusIndicator_.playMaintenanceTone(
+			batch.buzzerTone, policy.maximumBuzzerDutyPercent, nowMs);
+		return result == adapters::indicators::IndicatorResult::Applied
+			? adapters::modbus::WriteBatchResult{} : adapters::modbus::WriteBatchResult{domain::ErrorCode::HardwareError};
+	}
+	return adapters::modbus::ModbusConfigurationGateway::handle(&application.modbusConfigurationGateway_, batch);
 }
 
 void Application::processWebRequest(const std::uint32_t nowMs) noexcept
@@ -746,5 +884,21 @@ void Application::processWebRequest(const std::uint32_t nowMs) noexcept
 		break;
 	}
 	static_cast<void>(webRequestQueue_.complete(request.operationId, status, nowMs));
+}
+
+void Application::flushDiagnosticCounters(const std::uint32_t nowMs, const bool force) noexcept
+{
+	if (!diagnostics_.persistentCountersDirty() ||
+		(!force && nowMs - lastDiagnosticCounterFlushAtMs_ < diagnosticCounterFlushIntervalMs))
+	{
+		return;
+	}
+	lastDiagnosticCounterFlushAtMs_ = nowMs;
+	if (settingsStore_.saveDiagnosticCounters(diagnostics_.snapshot().persistentCounters))
+	{
+		diagnostics_.markPersistentCountersSaved();
+		return;
+	}
+	diagnostics_.recordStorageFailure();
 }
 }

@@ -1,6 +1,8 @@
 #pragma once
 
+#include "device_identity.h"
 #include "relay_types.h"
+#include "version_compatibility.h"
 
 #include <array>
 #include <cstddef>
@@ -8,7 +10,7 @@
 
 namespace switch_actuator::domain
 {
-inline constexpr std::uint16_t currentConfigurationSchemaVersion{3};
+inline constexpr std::uint16_t currentConfigurationSchemaVersion{compatibility::configuration.major};
 inline constexpr std::size_t boardModelCapacity{32};
 inline constexpr std::size_t hardwareRevisionCapacity{16};
 inline constexpr std::size_t deviceSerialCapacity{32};
@@ -129,10 +131,13 @@ struct Configuration final
 {
 	std::uint16_t schemaVersion{currentConfigurationSchemaVersion};
 	std::uint32_t generation{0};
+	ProductId productId{{"UNPROVISIONED"}};
 	std::array<char, boardModelCapacity> boardModel{};
 	std::array<char, hardwareRevisionCapacity> hardwareRevision{};
 	std::array<char, deviceSerialCapacity> deviceSerial{};
 	std::array<std::uint8_t, deviceUuidSize> deviceUuid{};
+	ManufacturingDate manufacturingDate{};
+	std::uint32_t manufacturingBatch{0};
 	ModbusConfiguration modbus{};
 	std::array<RelayChannelConfiguration, relayChannelCount> relayChannels{};
 	KnxConfiguration knx{};
@@ -145,10 +150,12 @@ enum class ConfigurationValidationError : std::uint8_t
 {
 	None,
 	UnsupportedSchema,
+	MissingProductId,
 	MissingBoardModel,
 	MissingHardwareRevision,
 	MissingDeviceSerial,
 	MissingDeviceUuid,
+	InvalidManufacturingIdentity,
 	InvalidModbusUnitId,
 	UnsupportedBaudRate,
 	InvalidSerialFormat,

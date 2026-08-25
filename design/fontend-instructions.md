@@ -4,7 +4,7 @@
 
 This document is the normative product, UX, frontend architecture, and delivery specification for the Switch Actuator web console. The console controls and monitors relay channels exposed by the firmware through the web adapter while Modbus RTU and KNX remain active peers.
 
-The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** define requirements. This document complements `design/software-architecture-instructions.md`; the firmware architecture is authoritative for relay safety, command arbitration, persistence, protocol behavior, and hardware constraints.
+The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** define requirements. This document complements `docs/architecture/system.md`; the firmware architecture is authoritative for relay safety, command arbitration, persistence, protocol behavior, and hardware constraints.
 
 The file name `fontend-instructions.md` is retained because it is the requested repository path. New references SHOULD use this exact path until a deliberate repository-wide rename is approved.
 

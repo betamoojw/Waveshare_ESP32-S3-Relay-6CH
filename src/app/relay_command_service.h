@@ -2,8 +2,8 @@
 
 #include "command_arbiter.h"
 #include "../domain/relay_types.h"
+#include "../hal/RelayHal.h"
 #include "../ports/event_sink.h"
-#include "../ports/relay_output_port.h"
 
 #include <array>
 #include <cstddef>
@@ -59,7 +59,7 @@ class RelayCommandService final
 public:
 	using RelayEventSink = ports::EventSink<domain::RelayStateChanged>;
 
-	RelayCommandService(ports::RelayOutputPort outputPort,
+	RelayCommandService(hal::RelayHal relayHal,
 						RelayEventSink eventSink,
 						CommandArbiter &commandArbiter) noexcept;
 
@@ -88,7 +88,7 @@ private:
 								  std::uint32_t correlationId,
 								  std::uint32_t nowMs) noexcept;
 
-	ports::RelayOutputPort outputPort_;
+	hal::RelayHal relayHal_;
 	RelayEventSink eventSink_;
 	CommandArbiter &commandArbiter_;
 	std::array<domain::RelaySnapshot, domain::relayChannelCount> snapshots_{};

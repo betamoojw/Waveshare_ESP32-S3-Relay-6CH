@@ -1,6 +1,9 @@
 #define EMBEDDED_CLI_IMPL
 #include "cli_adapter.h"
+#include "../logging/logger_adapter.h"
+#include "../../domain/version_compatibility.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdio>
 #include <cstring>
@@ -11,8 +14,6 @@ namespace switch_actuator::adapters::cli
 {
 namespace
 {
-constexpr std::string_view firmwareVersion{"1.00"};
-
 [[nodiscard]] bool hasNoArguments(const char *const arguments) noexcept
 {
 	return embeddedCliGetTokenCount(arguments) == 0;
@@ -83,6 +84,57 @@ constexpr std::string_view firmwareVersion{"1.00"};
 		return false;
 	}
 	value = static_cast<std::uint32_t>(parsed);
+	return true;
+}
+
+[[nodiscard]] int hexNibble(const char value) noexcept
+{
+	if (value >= '0' && value <= '9') return value - '0';
+	if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+	if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+	return -1;
+}
+
+[[nodiscard]] bool parseUuid(const char *const text,
+	std::array<std::uint8_t, domain::deviceUuidSize> &uuid) noexcept
+{
+	if (text == nullptr || std::strlen(text) != 36 || text[8] != '-' || text[13] != '-' ||
+		text[18] != '-' || text[23] != '-')
+	{
+		return false;
+	}
+	std::size_t byteIndex{0};
+	for (std::size_t index = 0; index < 36;)
+	{
+		if (text[index] == '-')
+		{
+			++index;
+			continue;
+		}
+		const auto high = hexNibble(text[index]);
+		const auto low = hexNibble(text[index + 1]);
+		if (high < 0 || low < 0 || byteIndex >= uuid.size()) return false;
+		uuid[byteIndex++] = static_cast<std::uint8_t>((high << 4) | low);
+		index += 2;
+	}
+	return byteIndex == uuid.size();
+}
+
+template <std::size_t Size>
+[[nodiscard]] bool copyText(const char *const source, std::array<char, Size> &destination) noexcept
+{
+	if (source == nullptr || *source == '\0' || std::strlen(source) >= destination.size()) return false;
+	destination.fill('\0');
+	std::copy_n(source, std::strlen(source), destination.begin());
+	return true;
+}
+
+template <std::size_t Size>
+[[nodiscard]] bool copyText(const std::string_view source, std::array<char, Size> &destination) noexcept
+{
+	if (source.empty() || source.size() >= destination.size()) return false;
+	destination.fill('\0');
+	std::copy(source.begin(), source.end(), destination.begin());
 	return true;
 }
 
@@ -268,9 +320,10 @@ CliInitializeResult CliAdapter::initialize() noexcept
 	cli_->appContext = this;
 	cli_->writeChar = writeCharacter;
 	cli_->onCommand = unknownCommand;
-	const std::array<CliCommandBinding, 24> bindings{{
+	const std::array<CliCommandBinding, 26> bindings{{
 		{"version", "Firmware and CLI version", true, this, versionCommand},
 		{"status", "Machine-readable device status", true, this, statusCommand},
+		{"set-log-level", "set-log-level [debug|info|warning|error|fatal]", true, this, setLogLevelCommand},
 		{"get-relay", "get-relay [all|0..5]", true, this, getRelayCommand},
 		{"set-relay", "set-relay [all|0..5] [on|off]", true, this, setRelayCommand},
 		{"toggle-relay", "toggle-relay [0..5]", true, this, toggleRelayCommand},
@@ -293,6 +346,7 @@ CliInitializeResult CliAdapter::initialize() noexcept
 		{"reboot", "Request a controlled restart", true, this, rebootCommand},
 		{"provision-web", "provision-web [username] [password]", true, this, provisionWebCommand},
 		{"mfg-test", "mfg-test [snapshot|button|relay|rgb|buzzer|safe]", true, this, manufacturingTestCommand},
+		{"service", "service [status|identity|diagnostics|set-manufacturing|provision-identity|erase-user-configuration|firmware-recovery|exit]", true, this, serviceCommand},
 	}};
 	for (const auto &binding : bindings)
 	{
@@ -303,7 +357,6 @@ CliInitializeResult CliAdapter::initialize() noexcept
 	}
 
 	correlationId_ = 0;
-	maintenanceAuthorized_ = false;
 	initialized_ = true;
 	print("ready=true adapter=cli version=1");
 	return CliInitializeResult::Initialized;
@@ -326,16 +379,6 @@ void CliAdapter::ingest(const std::uint8_t value) noexcept
 	{
 		embeddedCliReceiveChar(cli_, static_cast<char>(value));
 	}
-}
-
-void CliAdapter::setMaintenanceAuthorized(const bool authorized) noexcept
-{
-	maintenanceAuthorized_ = authorized;
-}
-
-bool CliAdapter::isMaintenanceAuthorized() const noexcept
-{
-	return maintenanceAuthorized_;
 }
 
 bool CliAdapter::isInitialized() const noexcept
@@ -363,7 +406,25 @@ void CliAdapter::unknownCommand(EmbeddedCli *const cli, CliCommand *) noexcept
 void CliAdapter::versionCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
 {
 	auto &adapter = *static_cast<CliAdapter *>(context);
-	adapter.print(hasNoArguments(arguments) ? "ok=true firmware=1.00 cli=1" : "ok=false error=unexpected-argument");
+	if (!hasNoArguments(arguments))
+	{
+		adapter.print("ok=false error=unexpected-argument");
+		return;
+	}
+	const auto &configuration = adapter.dependencies_.configurationService->active();
+	char output[256]{};
+	std::snprintf(output,
+		sizeof(output),
+		"ok=true hardware=%s firmware=%s config=%s api=%s modbus=%s knx=%s filesystem=%s cli=1 profile=%s",
+		configuration.hardwareRevision.data(),
+		adapter.dependencies_.diagnostics->snapshot().firmwareVersion.data(),
+		domain::compatibility::configuration.label.data(),
+		domain::compatibility::api.label.data(),
+		domain::compatibility::modbus.label.data(),
+		domain::compatibility::knxApplication.label.data(),
+		domain::compatibility::filesystem.label.data(),
+		domain::deploymentProfileName(adapter.dependencies_.deploymentProfile).data());
+	adapter.print(output);
 }
 
 void CliAdapter::statusCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
@@ -375,6 +436,39 @@ void CliAdapter::statusCommand(EmbeddedCli *, char *const arguments, void *const
 		return;
 	}
 	adapter.printStatus();
+}
+
+void CliAdapter::setLogLevelCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	auto &adapter = *static_cast<CliAdapter *>(context);
+	if (embeddedCliGetTokenCount(arguments) != 1)
+	{
+		adapter.print("ok=false error=usage usage=set-log-level_[debug|info|warning|error|fatal]");
+		return;
+	}
+	if (!adapter.mutatingCommandAllowed())
+	{
+		adapter.print("ok=false error=maintenance-authorization-required");
+		return;
+	}
+	const auto *const token = embeddedCliGetToken(arguments, 1);
+	logging::LogSeverity severity{};
+	if (std::strcmp(token, "debug") == 0) severity = logging::LogSeverity::Debug;
+	else if (std::strcmp(token, "info") == 0) severity = logging::LogSeverity::Info;
+	else if (std::strcmp(token, "warning") == 0) severity = logging::LogSeverity::Warning;
+	else if (std::strcmp(token, "error") == 0) severity = logging::LogSeverity::Error;
+	else if (std::strcmp(token, "fatal") == 0) severity = logging::LogSeverity::Fatal;
+	else
+	{
+		adapter.print("ok=false error=invalid-log-level");
+		return;
+	}
+	if (logging::LoggerAdapter::instance().setLevel(severity) != logging::LogLevelResult::Applied)
+	{
+		adapter.print("ok=false error=log-level-not-allowed");
+		return;
+	}
+	adapter.print("ok=true result=applied");
 }
 
 void CliAdapter::getRelayCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
@@ -525,11 +619,17 @@ void CliAdapter::manufacturingTestCommand(EmbeddedCli *, char *const arguments, 
 	static_cast<CliAdapter *>(context)->handleManufacturingTest(arguments);
 }
 
+void CliAdapter::serviceCommand(EmbeddedCli *, char *const arguments, void *const context) noexcept
+{
+	static_cast<CliAdapter *>(context)->handleService(arguments);
+}
+
 bool CliAdapter::dependenciesValid() const noexcept
 {
 	return dependencies_.stream != nullptr && dependencies_.switchingPolicy != nullptr && dependencies_.relayService != nullptr &&
 		   dependencies_.lifecycleSupervisor != nullptr && dependencies_.diagnostics != nullptr &&
 		   dependencies_.configurationService != nullptr && dependencies_.webSecurityService != nullptr &&
+		   dependencies_.serviceModeService != nullptr && dependencies_.board != nullptr &&
 		   dependencies_.configurationFile.isValid() &&
 		   dependencies_.statusIndicator != nullptr &&
 		   dependencies_.button != nullptr && dependencies_.networkManager != nullptr && dependencies_.modbus.isValid() &&
@@ -538,7 +638,11 @@ bool CliAdapter::dependenciesValid() const noexcept
 
 bool CliAdapter::mutatingCommandAllowed() const noexcept
 {
-	return dependencies_.mutatingCommandsEnabled && maintenanceAuthorized_ &&
+	const auto configurationLocked = domain::factoryConfigurationLocked(dependencies_.deploymentProfile,
+		dependencies_.configurationService->active().web.securityProvisioned,
+		dependencies_.configurationService->active().manufacturingBatch != 0);
+	return !configurationLocked &&
+		dependencies_.serviceModeService->snapshot().state == app::ServiceModeState::Service &&
 		   dependencies_.lifecycleSupervisor->acceptsOrdinaryCommands();
 }
 
@@ -575,13 +679,38 @@ void CliAdapter::printStatus() noexcept
 {
 	const auto &snapshots = dependencies_.relayService->snapshots();
 	const auto &diagnostics = dependencies_.diagnostics->snapshot();
-	char output[256]{};
+	char output[768]{};
 	std::snprintf(output,
 		sizeof(output),
-		"{\"ok\":true,\"lifecycle\":%u,\"uptime_ms\":%lu,\"authorized\":%s,\"relays\":[%u,%u,%u,%u,%u,%u]}",
+		"{\"ok\":true,\"lifecycle\":%u,\"uptime_ms\":%lu,\"boot_count\":%lu,\"watchdog_count\":%lu,"
+		"\"brownout_count\":%lu,\"config_error_count\":%lu,\"ota_failure_count\":%lu,"
+		"\"network_failure_count\":%lu,\"modbus_error_count\":%lu,\"knx_error_count\":%lu,"
+		"\"storage_error_count\":%lu,\"reset_reason\":%u,"
+		"\"free_heap_bytes\":%lu,\"psram_free_bytes\":%lu,\"cpu_mhz\":%lu,\"network_connected\":%s,"
+		"\"wifi_rssi_dbm\":%ld,\"modbus_available\":%s,\"knx_available\":%s,\"storage_healthy\":%s,"
+		"\"active_faults\":%u,\"authorized\":%s,\"relays\":[%u,%u,%u,%u,%u,%u]}",
 		static_cast<unsigned int>(dependencies_.lifecycleSupervisor->state()),
 		static_cast<unsigned long>(diagnostics.uptimeMs),
-		maintenanceAuthorized_ ? "true" : "false",
+		static_cast<unsigned long>(diagnostics.persistentCounters.bootCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.watchdogCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.brownoutCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.configErrorCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.otaFailureCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.networkFailureCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.modbusErrorCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.knxErrorCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.storageErrorCount),
+		static_cast<unsigned int>(diagnostics.resetReason),
+		static_cast<unsigned long>(diagnostics.runtime.freeHeapBytes),
+		static_cast<unsigned long>(diagnostics.runtime.psramFreeBytes),
+		static_cast<unsigned long>(diagnostics.runtime.cpuFrequencyMhz),
+		diagnostics.network.connected ? "true" : "false",
+		static_cast<long>(diagnostics.network.wifiRssiDbm),
+		diagnostics.modbus.available ? "true" : "false",
+		diagnostics.knx.available ? "true" : "false",
+		diagnostics.storage.settingsHealthy ? "true" : "false",
+		static_cast<unsigned int>(diagnostics.activeFaultCount),
+		dependencies_.serviceModeService->snapshot().state == app::ServiceModeState::Service ? "true" : "false",
 		static_cast<unsigned int>(snapshots[0].appliedState == domain::RelayState::On),
 		static_cast<unsigned int>(snapshots[1].appliedState == domain::RelayState::On),
 		static_cast<unsigned int>(snapshots[2].appliedState == domain::RelayState::On),
@@ -648,17 +777,27 @@ void CliAdapter::printManufacturingSnapshot() noexcept
 	const auto &relays = dependencies_.relayService->snapshots();
 	const auto &network = dependencies_.networkManager->statusPort().snapshot();
 	const auto role = dependencies_.modbus.role(dependencies_.modbus.context);
-	char output[640]{};
+	char output[768]{};
 	std::snprintf(output,
 		sizeof(output),
-		"ok=true interface=manufacturing version=1 model=%s hardware_revision=%s serial=%s generation=%lu authorized=%s "
+		"ok=true interface=manufacturing version=1 profile=%s configuration_locked=%s product_id=%s model=%s hardware_revision=%s serial=%s uuid=%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x manufacturing_date=%s manufacturing_batch=%lu generation=%lu authorized=%s "
 		"relay_initialized=%s indicator_initialized=%s button_initialized=%s button_pressed=%s network_state=%u "
 		"modbus_role=%s relays=[%u,%u,%u,%u,%u,%u]",
+		domain::deploymentProfileName(dependencies_.deploymentProfile).data(),
+		domain::factoryConfigurationLocked(dependencies_.deploymentProfile,
+			configuration.web.securityProvisioned, configuration.manufacturingBatch != 0) ? "true" : "false",
+		configuration.productId.value.data(),
 		configuration.boardModel.data(),
 		configuration.hardwareRevision.data(),
 		configuration.deviceSerial.data(),
+		configuration.deviceUuid[0], configuration.deviceUuid[1], configuration.deviceUuid[2], configuration.deviceUuid[3],
+		configuration.deviceUuid[4], configuration.deviceUuid[5], configuration.deviceUuid[6], configuration.deviceUuid[7],
+		configuration.deviceUuid[8], configuration.deviceUuid[9], configuration.deviceUuid[10], configuration.deviceUuid[11],
+		configuration.deviceUuid[12], configuration.deviceUuid[13], configuration.deviceUuid[14], configuration.deviceUuid[15],
+		configuration.manufacturingDate.iso8601.data(),
+		static_cast<unsigned long>(configuration.manufacturingBatch),
 		static_cast<unsigned long>(configuration.generation),
-		maintenanceAuthorized_ ? "true" : "false",
+		dependencies_.serviceModeService->snapshot().state == app::ServiceModeState::Service ? "true" : "false",
 		dependencies_.relayService->isInitialized() ? "true" : "false",
 		dependencies_.statusIndicator->isInitialized() ? "true" : "false",
 		dependencies_.button->isInitialized() ? "true" : "false",
@@ -1554,7 +1693,181 @@ void CliAdapter::handleProvisionWeb(char *const arguments) noexcept
 		print("ok=false error=restart-unavailable");
 		return;
 	}
-	maintenanceAuthorized_ = false;
+	static_cast<void>(dependencies_.serviceModeService->exit());
+	dependencies_.statusIndicator->setCommissioning(false);
 	print("ok=true result=web-provisioned restart_required=true");
+}
+
+bool CliAdapter::authorizeServiceOperation(const app::ServiceModeOperation operation) noexcept
+{
+	const auto locked = domain::factoryConfigurationLocked(dependencies_.deploymentProfile,
+		dependencies_.configurationService->active().web.securityProvisioned,
+		dependencies_.configurationService->active().manufacturingBatch != 0);
+	const auto result = dependencies_.serviceModeService->authorize(operation, dependencies_.deploymentProfile, locked);
+	if (result == app::ServiceModeResult::Applied) return true;
+	if (result == app::ServiceModeResult::FactoryConfigurationLocked)
+		print("ok=false error=factory-configuration-locked");
+	else if (result == app::ServiceModeResult::Unsupported)
+		print("ok=false error=operation-unavailable");
+	else
+		print("ok=false error=service-mode-required");
+	return false;
+}
+
+void CliAdapter::printServiceIdentity() noexcept
+{
+	const auto &configuration = dependencies_.configurationService->active();
+	char output[512]{};
+	std::snprintf(output, sizeof(output),
+		"{\"ok\":true,\"product_id\":\"%s\",\"board_model\":\"%s\",\"hardware_revision\":\"%s\","
+		"\"firmware\":\"%s\",\"device_serial\":\"%s\",\"device_uuid\":\"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\","
+		"\"manufacturing_date\":\"%s\",\"manufacturing_batch\":%lu}",
+		configuration.productId.value.data(), configuration.boardModel.data(), configuration.hardwareRevision.data(),
+		dependencies_.diagnostics->snapshot().firmwareVersion.data(), configuration.deviceSerial.data(),
+		configuration.deviceUuid[0], configuration.deviceUuid[1], configuration.deviceUuid[2], configuration.deviceUuid[3],
+		configuration.deviceUuid[4], configuration.deviceUuid[5], configuration.deviceUuid[6], configuration.deviceUuid[7],
+		configuration.deviceUuid[8], configuration.deviceUuid[9], configuration.deviceUuid[10], configuration.deviceUuid[11],
+		configuration.deviceUuid[12], configuration.deviceUuid[13], configuration.deviceUuid[14], configuration.deviceUuid[15],
+		configuration.manufacturingDate.iso8601.data(),
+		static_cast<unsigned long>(configuration.manufacturingBatch));
+	print(output);
+}
+
+void CliAdapter::printServiceDiagnostics() noexcept
+{
+	const auto &diagnostics = dependencies_.diagnostics->snapshot();
+	char output[384]{};
+	std::snprintf(output, sizeof(output),
+		"{\"ok\":true,\"uptime_ms\":%lu,\"boot_count\":%lu,\"watchdog_count\":%lu,"
+		"\"brownout_count\":%lu,\"network_failure_count\":%lu,\"storage_error_count\":%lu,"
+		"\"free_heap_bytes\":%lu,\"minimum_free_heap_bytes\":%lu,\"active_faults\":%u}",
+		static_cast<unsigned long>(diagnostics.uptimeMs),
+		static_cast<unsigned long>(diagnostics.persistentCounters.bootCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.watchdogCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.brownoutCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.networkFailureCount),
+		static_cast<unsigned long>(diagnostics.persistentCounters.storageErrorCount),
+		static_cast<unsigned long>(diagnostics.runtime.freeHeapBytes),
+		static_cast<unsigned long>(diagnostics.runtime.minimumFreeHeapBytes),
+		static_cast<unsigned int>(diagnostics.activeFaultCount));
+	print(output);
+}
+
+void CliAdapter::handleService(char *const arguments) noexcept
+{
+	const auto tokenCount = embeddedCliGetTokenCount(arguments);
+	if (tokenCount != 1 && tokenCount != 3 && tokenCount != 5)
+	{
+		print("ok=false error=usage usage=service_[status|identity|diagnostics|set-manufacturing|provision-identity|erase-user-configuration|firmware-recovery|exit]");
+		return;
+	}
+	const auto *const operation = embeddedCliGetToken(arguments, 1);
+	if (std::strcmp(operation, "status") == 0 && tokenCount == 1)
+	{
+		const auto &snapshot = dependencies_.serviceModeService->snapshot();
+		const auto nowMs = dependencies_.clock.nowMs();
+		const auto remainingMs = snapshot.state == app::ServiceModeState::Service &&
+			static_cast<std::int32_t>(snapshot.expiresAtMs - nowMs) > 0 ? snapshot.expiresAtMs - nowMs : 0;
+		char output[256]{};
+		std::snprintf(output, sizeof(output),
+			"ok=true mode=%s sequence=%lu remaining_ms=%lu firmware_recovery=false network_entry=false",
+			snapshot.state == app::ServiceModeState::Service ? "service" : "user",
+			static_cast<unsigned long>(snapshot.sequence), static_cast<unsigned long>(remainingMs));
+		print(output);
+		return;
+	}
+	if (std::strcmp(operation, "exit") == 0 && tokenCount == 1)
+	{
+		if (dependencies_.serviceModeService->snapshot().state != app::ServiceModeState::Service)
+		{
+			print("ok=false error=service-mode-required");
+			return;
+		}
+		static_cast<void>(dependencies_.serviceModeService->exit());
+		dependencies_.statusIndicator->setCommissioning(false);
+		print("ok=true mode=user");
+		return;
+	}
+	if (std::strcmp(operation, "identity") == 0 && tokenCount == 1)
+	{
+		if (authorizeServiceOperation(app::ServiceModeOperation::ReadIdentity)) printServiceIdentity();
+		return;
+	}
+	if (std::strcmp(operation, "diagnostics") == 0 && tokenCount == 1)
+	{
+		if (authorizeServiceOperation(app::ServiceModeOperation::ReadDiagnostics)) printServiceDiagnostics();
+		return;
+	}
+	if (std::strcmp(operation, "firmware-recovery") == 0 && tokenCount == 1)
+	{
+		static_cast<void>(authorizeServiceOperation(app::ServiceModeOperation::FirmwareRecovery));
+		return;
+	}
+	if (std::strcmp(operation, "set-manufacturing") == 0 && tokenCount == 3)
+	{
+		if (!authorizeServiceOperation(app::ServiceModeOperation::SetManufacturingData)) return;
+		auto replacement = dependencies_.configurationService->active();
+		std::uint32_t batch{0};
+		if (!copyText(embeddedCliGetToken(arguments, 2), replacement.manufacturingDate.iso8601) ||
+			!parseUint32(embeddedCliGetToken(arguments, 3), batch) || batch == 0 ||
+			!domain::isValid(replacement.manufacturingDate))
+		{
+			print("ok=false error=invalid-manufacturing-data");
+			return;
+		}
+		replacement.manufacturingBatch = batch;
+		commitConfiguration(replacement);
+		return;
+	}
+	if (std::strcmp(operation, "provision-identity") == 0 && tokenCount == 5)
+	{
+		if (!authorizeServiceOperation(app::ServiceModeOperation::ProvisionIdentity)) return;
+		auto replacement = dependencies_.configurationService->active();
+		std::uint32_t batch{0};
+		if (!copyText(dependencies_.board->productId, replacement.productId.value) ||
+			!copyText(dependencies_.board->model, replacement.boardModel) ||
+			!copyText(dependencies_.board->hardwareRevision, replacement.hardwareRevision) ||
+			!copyText(embeddedCliGetToken(arguments, 2), replacement.deviceSerial) ||
+			!parseUuid(embeddedCliGetToken(arguments, 3), replacement.deviceUuid) ||
+			!copyText(embeddedCliGetToken(arguments, 4), replacement.manufacturingDate.iso8601) ||
+			!parseUint32(embeddedCliGetToken(arguments, 5), batch) || batch == 0 ||
+			!domain::isValid(replacement.manufacturingDate))
+		{
+			print("ok=false error=invalid-identity");
+			return;
+		}
+		replacement.manufacturingBatch = batch;
+		commitConfiguration(replacement);
+		return;
+	}
+	if (std::strcmp(operation, "erase-user-configuration") == 0 && tokenCount == 1)
+	{
+		if (!authorizeServiceOperation(app::ServiceModeOperation::EraseUserConfiguration)) return;
+		if (!dependencies_.lifecycleSupervisor->acceptsOrdinaryCommands())
+		{
+			print("ok=false error=invalid-lifecycle");
+			return;
+		}
+		if (dependencies_.configurationService->eraseUserConfiguration() != app::ConfigurationUserResetResult::Erased)
+		{
+			print("ok=false error=configuration-erase-failure");
+			return;
+		}
+		const auto securityErased = dependencies_.webSecurityService->eraseUsersPreservingIdentity() ==
+			ports::WebSecurityStoreResult::Applied;
+		static_cast<void>(dependencies_.serviceModeService->exit());
+		dependencies_.statusIndicator->setCommissioning(false);
+		const auto restart = dependencies_.lifecycleSupervisor->requestRestart(dependencies_.clock.nowMs());
+		if (!securityErased)
+		{
+			print("ok=false error=security-erase-failure configuration_erased=true restart_required=true");
+			return;
+		}
+		print(restart == app::LifecycleResult::InvalidTransition || restart == app::LifecycleResult::InvalidEventSink ?
+			"ok=false error=restart-unavailable configuration_erased=true" :
+			"ok=true result=user-configuration-erased identity_preserved=true restart_required=true");
+		return;
+	}
+	print("ok=false error=invalid-service-operation");
 }
 }

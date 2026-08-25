@@ -29,7 +29,7 @@ describe('API request security headers', () => {
     setSessionCsrfToken('session-csrf')
     setUnauthorizedHandler(unauthorized)
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      error: { code: 'session.unauthorized', message: 'Authentication required.' },
+      error: { code: 'unauthorized', message: 'Authentication is required.' },
     }), { status: 401, headers: { 'Content-Type': 'application/json' } })))
 
     await expect(api.session()).rejects.toMatchObject({ status: 401 })

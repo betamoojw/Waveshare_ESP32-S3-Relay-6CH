@@ -56,7 +56,7 @@ describe('LoginPage', () => {
 
   it('shows recovery-oriented rate-limit and expired-session messages', async () => {
     const { ApiError } = await import('../../api/client')
-    apiMocks.createSession.mockRejectedValue(new ApiError('session.rate_limited', 'Sign-in unavailable.', 429))
+    apiMocks.createSession.mockRejectedValue(new ApiError('busy', 'The device is busy; retry later.', 429))
     renderLogin(vi.fn(), true)
     const user = userEvent.setup()
 

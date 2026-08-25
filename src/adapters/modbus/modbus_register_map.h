@@ -1,7 +1,8 @@
 #pragma once
 
 #include "../../app/lifecycle_supervisor.h"
-#include "../../domain/relay_types.h"
+#include "../../domain/configuration.h"
+#include "../../domain/version_compatibility.h"
 
 #include <array>
 #include <cstddef>
@@ -64,6 +65,8 @@ struct RegisterMapSnapshot final
 class ModbusRegisterMap final
 {
 public:
+	static constexpr std::uint16_t versionMajor{domain::compatibility::modbus.major};
+	static constexpr std::uint16_t versionMinor{0};
 	static constexpr std::uint16_t relayCoilAddress{0};
 	static constexpr std::uint16_t relayDiscreteInputAddress{0};
 	static constexpr std::uint16_t relayHoldingAddress{32};
@@ -111,6 +114,10 @@ public:
 													 std::uint32_t firstCorrelationId,
 													 std::uint32_t receivedAtMs,
 													 HoldingWriteBatch &batch) const noexcept;
+		[[nodiscard]] static bool encodeUartSettings(const domain::ModbusConfiguration &configuration,
+												 std::uint16_t &encoded) noexcept;
+		[[nodiscard]] static bool decodeUartSettings(std::uint16_t encoded,
+												 domain::ModbusConfiguration &configuration) noexcept;
 
 private:
 	[[nodiscard]] static bool rangeWithin(std::uint16_t address,

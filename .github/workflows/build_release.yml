@@ -6,6 +6,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -16,14 +17,75 @@ jobs:
           architecture: "x64"
       - name: Install PlatformIO
         run: python3 -m pip install pioarduino==6.1.19
-      - name: Build firmwares
-        run: FIRMWARE_VERSION=${{github.ref_name}} platformio run
-      - name: Archive
+      - name: Install release tooling
+        run: python3 -m pip install -r tools/release/requirements.txt
+      - name: Load protected release inputs
+        env:
+          SECURE_BOOT_KEY_BASE64: ${{ secrets.PRODUCTION_SIGNING_KEY_PEM_BASE64 }}
+          RELEASE_KEY_BASE64: ${{ secrets.RELEASE_SIGNING_KEY_PEM_BASE64 }}
+          BOOTLOADER_BASE64: ${{ secrets.PRODUCTION_BOOTLOADER_BIN_BASE64 }}
+        run: |
+          test -n "$SECURE_BOOT_KEY_BASE64"
+          test -n "$RELEASE_KEY_BASE64"
+          test -n "$BOOTLOADER_BASE64"
+          printf '%s' "$SECURE_BOOT_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/secure-boot-key.pem"
+          printf '%s' "$RELEASE_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/release-signing-key.pem"
+          printf '%s' "$BOOTLOADER_BASE64" | base64 --decode > "$RUNNER_TEMP/bootloader.bin"
+          chmod 600 "$RUNNER_TEMP/secure-boot-key.pem" "$RUNNER_TEMP/release-signing-key.pem"
+      - name: Build signed production firmware
+        env:
+          FIRMWARE_VERSION: ${{ github.ref_name }}
+          PRODUCTION_SIGNING_KEY: ${{ runner.temp }}/secure-boot-key.pem
+          SECURE_BOOT_PROVISIONING_APPROVED: "1"
+          FLASH_ENCRYPTION_PROVISIONING_APPROVED: "1"
+        run: platformio run -e production
+      - name: Verify Secure Boot v2 images
+        run: |
+          python3 "$HOME/.platformio/packages/tool-esptoolpy/espsecure.py" verify-signature \
+            --version 2 \
+            --keyfile "$RUNNER_TEMP/secure-boot-key.pem" \
+            "$RUNNER_TEMP/bootloader.bin"
+          python3 "$HOME/.platformio/packages/tool-esptoolpy/espsecure.py" verify-signature \
+            --version 2 \
+            --keyfile "$RUNNER_TEMP/secure-boot-key.pem" \
+            ".pio/build/production/firmware_production_${GITHUB_REF_NAME}-signed.bin"
+      - name: Build production filesystem
+        env:
+          FIRMWARE_VERSION: ${{ github.ref_name }}
+          PRODUCTION_SIGNING_KEY: ${{ runner.temp }}/secure-boot-key.pem
+          SECURE_BOOT_PROVISIONING_APPROVED: "1"
+          FLASH_ENCRYPTION_PROVISIONING_APPROVED: "1"
+        run: platformio run -e production -t buildfs
+      - name: Create release package
+        env:
+          MINIMUM_FIRMWARE_VERSION: ${{ vars.MINIMUM_FIRMWARE_VERSION }}
+          RELEASE_HARDWARE_REVISION: ${{ vars.RELEASE_HARDWARE_REVISION }}
+        run: |
+          minimum_version="${MINIMUM_FIRMWARE_VERSION:-$GITHUB_REF_NAME}"
+          hardware_revision="${RELEASE_HARDWARE_REVISION:-HW-A01}"
+          source_date_epoch="$(git log -1 --format=%ct)"
+          python3 tools/release/create_release_package.py \
+            --firmware ".pio/build/production/firmware_production_${GITHUB_REF_NAME}-signed.bin" \
+            --bootloader "$RUNNER_TEMP/bootloader.bin" \
+            --partitions .pio/build/production/partitions.bin \
+            --filesystem .pio/build/production/littlefs.bin \
+            --signing-key "$RUNNER_TEMP/release-signing-key.pem" \
+            --release-notes CHANGELOG.md \
+            --output release \
+            --product relay-6ch \
+            --hardware "$hardware_revision" \
+            --version "$GITHUB_REF_NAME" \
+            --minimum-version "$minimum_version" \
+            --git-commit "$GITHUB_SHA" \
+            --source-date-epoch "$source_date_epoch" \
+            --force
+      - name: Archive release package
         uses: actions/upload-artifact@v4
         with:
-          name: firmware
-          path: .pio/build/*/firmware_*.bin
-          retention-days: 1
+          name: release-package
+          path: release/
+          if-no-files-found: error
+          retention-days: 30
   release:
     name: Release
     # if: startsWith(github.event.ref, 'refs/tags/v')
@@ -37,12 +99,10 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: firmware
-          path: firmware
-      # - name: Display structure of downloaded files
-      #   run: ls -R
+          name: release-package
+          path: release
       - name: release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "firmware/*/firmware_*.bin"
+          artifacts: "release/*"
           bodyFile: "CHANGELOG.md"
