@@ -57,7 +57,7 @@ struct CliDependencies final
 	const button::ButtonAdapter *button{nullptr};
 	network::NetworkManager *networkManager{nullptr};
 	ports::ModbusRtuControlPort modbus{};
-	ports::ClockPort clock{};
+	ports::IClock clock{};
 	domain::DeploymentProfile deploymentProfile{domain::DeploymentProfile::Development};
 };
 

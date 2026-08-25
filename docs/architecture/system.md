@@ -94,7 +94,8 @@ flowchart TB
 
 		subgraph HAL[Hardware abstraction]
 				BOARD[Board descriptor]
-				HW[Relay / Button / RGB / Buzzer / RS-485 / Network HAL]
+				HW[IRelay / IButton / IIndicator / IBuzzer / IUart]
+				SYSTEM[IStorage / IWatchdog / INetwork / IClock]
 		end
 
 		subgraph Outbound[Outbound ports and adapters]
@@ -130,11 +131,15 @@ flowchart TB
 	before crossing a protocol boundary. Protocol adapters MUST exhaustively map
 	the domain code to HTTP, Modbus, KNX, or other native representations and
 	MUST NOT invent independent string error taxonomies.
-- Hardware contracts and board selection live in `src/hal`. Application and
+- Hardware contracts and board selection live in `src/hal`; persistence and
+	clock contracts live in `src/ports`. Application and
 	domain services MUST NOT include a product-specific board header or use GPIO,
-	LEDC, UART, Wi-Fi, or Arduino APIs directly.
+	LEDC, UART, Wi-Fi, NVS, FreeRTOS, or Arduino APIs directly.
 - Concrete BSP adapters implement HAL contracts. Product selection is confined
 	to `hal::board()` in the composition layer.
+- Hardware interfaces are allocation-free value objects containing handlers and
+	an opaque context. They MUST fail closed when required handlers are absent and
+	MUST NOT use virtual dispatch or transfer ownership.
 
 ## 6. Domain Model
 

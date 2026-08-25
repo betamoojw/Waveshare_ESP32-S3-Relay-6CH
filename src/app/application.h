@@ -109,10 +109,10 @@ private:
 	adapters::nvs::NvsWebSecurityStore webSecurityStore_{};
 	adapters::web::Esp32WebCrypto webCrypto_{};
 	WebSecurityService webSecurityService_{webSecurityStore_.port(), webCrypto_.port(),
-		ports::ClockPort{monotonicMilliseconds, this}};
+		ports::IClock{monotonicMilliseconds, this}};
 	adapters::network::NetworkManager network_{hal::board(),
 		configurationService_, wifiManagementService_, wifiAdapter_, ethernetAdapter_.port(), Serial};
-	hal::NetworkHal networkHal_{};
+	hal::INetwork networkHal_{};
 	adapters::bsp::Esp32RgbLedHal rgbLedHardware_;
 	adapters::bsp::Esp32BuzzerHal buzzerHardware_;
 	adapters::indicators::StatusIndicator statusIndicator_;
@@ -122,10 +122,11 @@ private:
 	adapters::modbus::ModbusConfigurationGateway modbusConfigurationGateway_;
 	adapters::modbus::ModbusApplicationGateway modbusApplicationGateway_;
 	adapters::modbus::Esp32ModbusSerialTransport modbusSerialTransport_;
-	hal::Rs485Hal rs485Hal_{};
+	hal::IUart uart_{};
 	adapters::modbus::ModbusRtuAdapter modbusRtu_;
 	adapters::cli::CliAdapter cli_;
 	adapters::watchdog::Esp32TaskWatchdog watchdog_{};
+	hal::IWatchdog watchdogHal_{watchdog_.hal()};
 	adapters::web::WebServerAdapter webServer_{{&relayService_,
 		&switchingPolicy_,
 		&diagnostics_,

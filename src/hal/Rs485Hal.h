@@ -9,7 +9,7 @@ using Rs485ReadHandler = std::int32_t (*)(void *context, std::uint8_t *buffer,
 using Rs485WriteHandler = std::int32_t (*)(void *context, const std::uint8_t *buffer,
 	std::uint16_t count, std::int32_t byteTimeoutMs) noexcept;
 
-struct Rs485Hal final
+struct IUart final
 {
 	Rs485ReadHandler read{nullptr};
 	Rs485WriteHandler write{nullptr};
@@ -17,4 +17,6 @@ struct Rs485Hal final
 
 	[[nodiscard]] constexpr bool isValid() const noexcept { return read != nullptr && write != nullptr; }
 };
+
+using Rs485Hal = IUart;
 }

@@ -16,7 +16,17 @@ REQUIRED_PRODUCTION_APPROVALS = (
 	"SECURE_BOOT_PROVISIONING_APPROVED",
 	"FLASH_ENCRYPTION_PROVISIONING_APPROVED",
 )
+KEY_DIGEST_PATTERN = re.compile(r"[0-9a-fA-F]{64}")
 SECRET_KEY_PARTS = ("password", "passwd", "privatekey", "private_key", "psk", "secret", "token")
+PRIVATE_KEY_MARKERS = (b"-----BEGIN PRIVATE KEY-----", b"-----BEGIN RSA PRIVATE KEY-----",
+	b"-----BEGIN EC PRIVATE KEY-----")
+PRIVATE_KEY_BLOCK = re.compile(
+	br"-----BEGIN (?:ENCRYPTED |RSA |EC )?PRIVATE KEY-----[\s\S]+?-----END (?:ENCRYPTED |RSA |EC )?PRIVATE KEY-----")
+
+# NOTE: strict compiler flags (-Werror, -Wstack-usage=8192) are enforced
+# through static analysis gates (clang-tidy, cppcheck) which target only
+# owned source. build_src_flags in platformio.ini applies -Wall and -Wextra
+# to all source (including third-party libraries like nanomodbus) as warnings.
 
 
 def exclude_psychic_middlewares(_environment, _node):
@@ -67,21 +77,53 @@ def find_embedded_secret(value, path="root"):
 	return None
 
 
+def validate_deployment_inputs(project_directory):
+	configuration_paths = [project_directory / "config" / "default_configuration.json"]
+	configuration_paths.extend(sorted((project_directory / "data" / "config").glob("*.json")))
+	for configuration_path in configuration_paths:
+		try:
+			content = configuration_path.read_bytes()
+			configuration = json.loads(content.decode("utf-8"))
+		except (OSError, UnicodeError, ValueError) as error:
+			fail("deployment configuration cannot be validated at %s: %s" % (configuration_path, error))
+		secret_path = find_embedded_secret(configuration)
+		if secret_path:
+			fail("deployment configuration %s contains a credential at %s" % (configuration_path, secret_path))
+		if any(marker in content for marker in PRIVATE_KEY_MARKERS):
+			fail("deployment configuration contains private key material at %s" % configuration_path)
+	for root_name in ("src", "include", "config", "data", "tools", ".github"):
+		root = project_directory / root_name
+		if not root.exists():
+			continue
+		for candidate in root.rglob("*"):
+			if candidate.is_file() and candidate.stat().st_size <= 4 * 1024 * 1024:
+				try:
+					content = candidate.read_bytes()
+				except OSError as error:
+					fail("source secret scan cannot read %s: %s" % (candidate, error))
+				if PRIVATE_KEY_BLOCK.search(content):
+					fail("source tree contains a complete PEM private key at %s" % candidate)
+
+
 def sign_production_image(_source, _target, environment):
 	unsigned_image = Path(environment.subst("$BUILD_DIR/${PROGNAME}.bin")).resolve()
 	signed_image = unsigned_image.with_name("%s-signed.bin" % unsigned_image.stem)
-	esptool_package = Path(env.PioPlatform().get_package_dir("tool-esptoolpy"))
-	espsecure = esptool_package / "espsecure.py"
-	if not espsecure.is_file():
-		fail("ESP32 espsecure signer is unavailable")
+	if signed_image.exists():
+		signed_image.unlink()
 	command = [sys.executable, str(espsecure), "sign-data", "--version", "2",
 		"--keyfile", str(production_signing_key), "--output", str(signed_image), str(unsigned_image)]
 	subprocess.run(command, check=True)
+	if not signed_image.is_file() or signed_image.stat().st_size <= unsigned_image.stat().st_size:
+		fail("Secure Boot v2 signing did not produce a signed image")
+	subprocess.run([sys.executable, str(espsecure), "verify-signature", "--version", "2",
+		"--keyfile", str(production_signing_key), str(signed_image)], check=True)
 	print("Signed production firmware: %s" % signed_image)
 
 
 env.Replace(PROGNAME="firmware_%s_%s" % (build_tag, artifact_version_tag))
 env.Append(CPPDEFINES=[("FIRMWARE_VERSION", env.StringifyMacro(version_tag))])
+linker_map = Path(env.subst("$BUILD_DIR")) / (env.subst("${PROGNAME}") + ".map")
+env.Append(LINKFLAGS=["-Wl,-Map,%s" % linker_map])
 
 if build_tag == PRODUCTION_ENVIRONMENT:
 	if SEMANTIC_FIRMWARE_VERSION.fullmatch(requested_version) is None:
@@ -95,12 +137,20 @@ if build_tag == PRODUCTION_ENVIRONMENT:
 	production_signing_key = Path(key_value).expanduser().resolve()
 	if not production_signing_key.is_file():
 		fail("PRODUCTION_SIGNING_KEY does not reference a readable file")
-	configuration_path = Path(env.subst("$PROJECT_DIR")) / "config" / "default_configuration.json"
-	try:
-		configuration = json.loads(configuration_path.read_text(encoding="utf-8"))
-	except (OSError, ValueError) as error:
-		fail("embedded configuration cannot be validated: %s" % error)
-	secret_path = find_embedded_secret(configuration)
-	if secret_path:
-		fail("embedded configuration contains a credential at %s" % secret_path)
+	esptool_package = Path(env.PioPlatform().get_package_dir("tool-esptoolpy"))
+	espsecure = esptool_package / "espsecure.py"
+	if not espsecure.is_file():
+		fail("ESP32 espsecure signer is unavailable")
+	expected_key_digest = os.getenv("PRODUCTION_SIGNING_KEY_DIGEST", "").strip().lower()
+	if KEY_DIGEST_PATTERN.fullmatch(expected_key_digest) is None:
+		fail("PRODUCTION_SIGNING_KEY_DIGEST must be the approved 64-hex Secure Boot v2 public-key digest")
+	digest_path = Path(env.subst("$BUILD_DIR")) / "secure-boot-key-digest.bin"
+	digest_path.parent.mkdir(parents=True, exist_ok=True)
+	subprocess.run([sys.executable, str(espsecure), "digest-sbv2-public-key",
+		"--keyfile", str(production_signing_key), "--output", str(digest_path)], check=True)
+	actual_key_digest = digest_path.read_bytes().hex()
+	digest_path.unlink()
+	if actual_key_digest != expected_key_digest:
+		fail("PRODUCTION_SIGNING_KEY does not match the approved production key digest")
+	validate_deployment_inputs(Path(env.subst("$PROJECT_DIR")))
 	env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", sign_production_image)

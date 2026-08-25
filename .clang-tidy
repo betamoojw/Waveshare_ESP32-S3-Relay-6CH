@@ -1,0 +1,18 @@
+---
+Checks: >
+  -*,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.*,
+  clang-analyzer-security.*,
+  bugprone-dangling-handle,
+  bugprone-misplaced-widening-cast,
+  bugprone-signed-char-misuse,
+  bugprone-sizeof-expression,
+  bugprone-string-constructor,
+  bugprone-suspicious-memset-usage,
+  bugprone-use-after-move
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(^|[/\\])src[/\\].*'
+FormatStyle: file
+...

@@ -1,4 +1,10 @@
-# Production Provisioning
+# Legacy Provisioning Prototype
+
+This directory is retained for compatibility with earlier station integration.
+New manufacturing deployments must use the canonical, release-package-aware
+tooling in [Factory tooling](../factory/README.md). The factory workflow adds
+artifact flashing, read-only eFuse verification, staged commands, and the
+secret-free production record contract.
 
 The provisioning tools require Python 3.9 or newer, PlatformIO, and `pyserial`:
 

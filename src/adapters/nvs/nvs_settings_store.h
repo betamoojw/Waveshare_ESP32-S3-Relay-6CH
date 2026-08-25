@@ -36,7 +36,7 @@ public:
 	[[nodiscard]] NvsInitializeResult initialize() noexcept;
 	[[nodiscard]] DiagnosticCountersBootResult beginDiagnosticCounters(domain::ResetCategory resetReason) noexcept;
 	[[nodiscard]] bool saveDiagnosticCounters(const domain::PersistentDiagnosticCounters &counters) noexcept;
-	[[nodiscard]] ports::SettingsStore port() noexcept;
+	[[nodiscard]] ports::IStorage port() noexcept;
 	[[nodiscard]] bool isInitialized() const noexcept;
 
 private:

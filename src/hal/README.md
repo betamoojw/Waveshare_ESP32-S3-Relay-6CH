@@ -1,38 +1,54 @@
 # Hardware Abstraction Layer
 
-The HAL is the firmware's hardware-facing contract. It is standard C++17,
-allocation-free, and uses fixed function tables rather than virtual dispatch.
+The HAL contains the firmware's hardware-facing outbound ports. It is standard
+C++17, allocation-free, and uses copyable function tables rather than virtual
+dispatch. `Interfaces.h` is the aggregate include for all hardware contracts.
 
 ```text
 Application and services
-          |
-          v
-  src/hal contracts
-          |
-          v
-ESP32 BSP implementations and board descriptors
-          |
-          v
-Selected ESP32 relay product
+     |
+     v
+ HAL and persistence ports
+     |
+     +----+----+
+     |         |
+ ESP32-S3   Future MCU
+ adapters    adapters
 ```
 
 ## Ownership
 
-| File | Responsibility |
-|---|---|
-| `Board.h` | Select the active board for the build. |
-| `BoardDescriptor.h` | Describe model, capabilities, polarity, and physical assignments. |
-| `RelayHal.h` | Apply typed relay states. Missing handlers fail closed. |
-| `ButtonHal.h` | Initialize and read the physical button. Gesture policy remains outside HAL. |
-| `RgbLedHal.h` | Write RGB output values. |
-| `BuzzerHal.h` | Initialize and write bounded tone/duty output. |
-| `Rs485Hal.h` | Provide byte transport callbacks to protocol adapters. |
-| `NetworkHal.h` | Aggregate network status and control handles. |
+| Interface | Current header | Responsibility |
+|---|---|---|
+| `IRelay` | `RelayHal.h` | Apply typed relay states. Missing handlers fail closed. |
+| `IButton` | `ButtonHal.h` | Initialize and read a physical button. Gesture policy remains outside HAL. |
+| `IIndicator` | `RgbLedHal.h` | Write physical RGB indicator output. Status policy remains in the indicator adapter. |
+| `IBuzzer` | `BuzzerHal.h` | Initialize and write bounded tone/duty output. |
+| `IUart` | `Rs485Hal.h` | Provide bounded byte transport for RS-485 and other UART-backed adapters. |
+| `IStorage` | `../ports/settings_store.h` | Load, save, and erase transactional device configuration. |
+| `IWatchdog` | `WatchdogHal.h` | Initialize, feed, and query watchdog health. |
+| `INetwork` | `NetworkHal.h` | Aggregate network status and control ports. |
+| `IClock` | `../ports/clock_port.h` | Supply monotonic milliseconds without exposing an MCU timer API. |
 
-Concrete ESP32 implementations live under `src/adapters/bsp/`. Arduino, GPIO,
-LEDC, UART, Wi-Fi, and board-vendor APIs MUST NOT appear in domain or
+`Board.h` selects the active board at build time. `BoardDescriptor.h` describes
+model, capabilities, polarity, and physical assignments. `IStorage` does not
+own LittleFS deployment files; those use `ConfigurationFilePort` because
+transactional settings and deployment bundles have different lifecycles.
+
+Legacy names such as `RelayHal`, `ButtonHal`, `RgbLedHal`, `BuzzerHal`,
+`Rs485Hal`, `NetworkHal`, `ClockPort`, and `SettingsStore` remain type aliases
+for source compatibility. New production code uses the canonical `I*` names.
+
+Concrete ESP32 implementations live under `src/adapters/`. Arduino, FreeRTOS,
+GPIO, LEDC, UART, Wi-Fi, NVS, and board-vendor APIs MUST NOT appear in domain or
 application services. `Application` is the composition root: it owns concrete
-drivers but passes only HAL values into services and protocol wiring.
+drivers but passes only interface values into services and protocol wiring.
+
+To target another MCU, implement the same interfaces and replace construction
+in `Application`; relay policy, scenes, timers, KNX, Modbus, and Web behavior do
+not change. Product variants may share adapters independently: a wall panel can
+provide `IButton`, `IIndicator`, and `INetwork` without relays, while DIN-rail
+actuators can provide a larger `IRelay` implementation.
 
 ## Adding A Board
 

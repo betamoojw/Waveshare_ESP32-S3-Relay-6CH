@@ -9,11 +9,11 @@ using RelayApplyHandler = RelayHalResult (*)(void *context,
 	domain::RelayChannelId channel,
 	domain::RelayState state) noexcept;
 
-class RelayHal final
+class IRelay final
 {
 public:
-	constexpr RelayHal() noexcept = default;
-	constexpr RelayHal(const RelayApplyHandler handler, void *const context = nullptr) noexcept
+	constexpr IRelay() noexcept = default;
+	constexpr IRelay(const RelayApplyHandler handler, void *const context = nullptr) noexcept
 		: handler_{handler}, context_{context}
 	{
 	}
@@ -30,4 +30,6 @@ private:
 	RelayApplyHandler handler_{nullptr};
 	void *context_{nullptr};
 };
+
+using RelayHal = IRelay;
 }

@@ -59,7 +59,7 @@ RelayOutputResult Esp32RelayOutput::initialize() noexcept
 	return RelayOutputResult::Applied;
 }
 
-hal::RelayHal Esp32RelayOutput::hal() noexcept
+hal::IRelay Esp32RelayOutput::hal() noexcept
 {
 	return {applyCallback, this};
 }

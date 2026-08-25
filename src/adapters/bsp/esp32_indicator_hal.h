@@ -10,7 +10,7 @@ class Esp32RgbLedHal final
 {
 public:
 	explicit Esp32RgbLedHal(const hal::BoardDescriptor &descriptor) noexcept;
-	[[nodiscard]] hal::RgbLedHal hal() noexcept;
+	[[nodiscard]] hal::IIndicator hal() noexcept;
 
 private:
 	[[nodiscard]] static bool writeCallback(void *context,
@@ -25,7 +25,7 @@ class Esp32BuzzerHal final
 public:
 	explicit Esp32BuzzerHal(const hal::BoardDescriptor &descriptor) noexcept;
 	~Esp32BuzzerHal();
-	[[nodiscard]] hal::BuzzerHal hal() noexcept;
+	[[nodiscard]] hal::IBuzzer hal() noexcept;
 
 private:
 	[[nodiscard]] static bool initializeCallback(void *context) noexcept;

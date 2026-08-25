@@ -32,12 +32,12 @@ using SettingsLoadHandler = SettingsLoadResult (*)(void *context, domain::Config
 using SettingsSaveHandler = SettingsSaveResult (*)(void *context, const domain::Configuration &configuration) noexcept;
 using SettingsEraseHandler = SettingsEraseResult (*)(void *context) noexcept;
 
-class SettingsStore final
+class IStorage final
 {
 public:
-	constexpr SettingsStore() noexcept = default;
+	constexpr IStorage() noexcept = default;
 
-	constexpr SettingsStore(SettingsLoadHandler loadHandler,
+	constexpr IStorage(SettingsLoadHandler loadHandler,
 							SettingsSaveHandler saveHandler,
 							SettingsEraseHandler eraseHandler,
 							void *context = nullptr) noexcept
@@ -71,4 +71,6 @@ private:
 	SettingsEraseHandler eraseHandler_{nullptr};
 	void *context_{nullptr};
 };
+
+using SettingsStore = IStorage;
 }

@@ -5,8 +5,50 @@ on:
   pull_request:
     branches: [main]
 jobs:
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          architecture: "x64"
+      - name: Install analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-format clang-tidy cppcheck
+          python3 -m pip install pioarduino==6.1.19
+      - name: Check changed C++ formatting
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if test -z "$BASE_SHA" || test "$BASE_SHA" = "0000000000000000000000000000000000000000"; then
+            BASE_SHA="$(git rev-parse HEAD^)"
+          fi
+          git clang-format --diff "$BASE_SHA" -- src test include examples > clang-format.patch
+          if grep -q '^diff --git' clang-format.patch; then
+            cat clang-format.patch
+            exit 1
+          fi
+      - name: Run clang-tidy
+        run: python3 tools/analysis/run_clang_tidy.py --report .pio/reports/clang-tidy.json
+      - name: Run cppcheck
+        run: >-
+          cppcheck --enable=warning,portability --std=c++17 --error-exitcode=1
+          --inline-suppr --suppress=missingIncludeSystem --suppress=unknownMacro
+          --suppress=unmatchedSuppression
+          --suppress=subtractPointers:src/adapters/configuration/json_configuration_source.cpp
+          --quiet -Isrc -Iinclude src
+      - name: Test resource analyzer
+        run: python3 -B -m unittest discover -s tools/analysis -p "test_*.py" -v
   build:
     name: Build
+    needs: static-analysis
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -22,6 +64,13 @@ jobs:
         run: FIRMWARE_VERSION=main platformio run -e development
       - name: Build engineering firmware
         run: FIRMWARE_VERSION=main platformio run -e engineering
+      - name: Build engineering filesystem
+        run: FIRMWARE_VERSION=main platformio run -e engineering -t buildfs
+      - name: Enforce engineering resource budgets
+        run: |
+          python3 tools/analysis/check_resources.py \
+            --build-dir .pio/build/engineering \
+            --report .pio/reports/engineering-resources.json
       - name: Archive
         uses: actions/upload-artifact@v4
         with:
@@ -29,4 +78,6 @@ jobs:
           path: |
             .pio/build/development/firmware_*.bin
             .pio/build/engineering/firmware_*.bin
+            .pio/build/engineering/firmware_*.map
+            .pio/reports/engineering-resources.json
           retention-days: 1

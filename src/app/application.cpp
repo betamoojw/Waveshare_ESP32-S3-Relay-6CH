@@ -52,11 +52,11 @@ Application::Application() noexcept
 	  statusIndicator_{rgbLedHardware_.hal(), buzzerHardware_.hal()},
 	  buttonHardware_{hal::board()},
 	  button_{buttonHardware_.hal(), handleButtonEvent, this},
-	  knx_{{&switchingPolicy_, &relayService_, &diagnostics_, ports::ClockPort{monotonicMilliseconds, this}, networkHal_.status}},
+	  knx_{{&switchingPolicy_, &relayService_, &diagnostics_, ports::IClock{monotonicMilliseconds, this}, networkHal_.status}},
 	  modbusConfigurationGateway_{{&configurationService_,
 		&lifecycle_,
 		&diagnostics_,
-		ports::ClockPort{monotonicMilliseconds, this}}},
+		ports::IClock{monotonicMilliseconds, this}}},
 	  modbusApplicationGateway_{{&switchingPolicy_,
 		&relayService_,
 		&configurationService_,
@@ -67,10 +67,10 @@ Application::Application() noexcept
 		handleModbusNonRelayWrite,
 		this}},
 	  modbusSerialTransport_{Serial1, hal::board()},
-	  rs485Hal_{modbusSerialTransport_.hal()},
-	  modbusRtu_{{rs485Hal_.read,
-		rs485Hal_.write,
-		rs485Hal_.context,
+	  uart_{modbusSerialTransport_.hal()},
+	  modbusRtu_{{uart_.read,
+		uart_.write,
+		uart_.context,
 		adapters::modbus::ModbusApplicationGateway::provideSnapshot,
 		&modbusApplicationGateway_,
 		adapters::modbus::ModbusApplicationGateway::handleWriteBatch,
@@ -90,7 +90,7 @@ Application::Application() noexcept
 		&button_,
 		&network_,
 		modbusRtu_.controlPort(),
-		ports::ClockPort{monotonicMilliseconds, this},
+		ports::IClock{monotonicMilliseconds, this},
 		domain::deploymentProfile}}
 {
 }
@@ -314,7 +314,7 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 			nowMs));
 		statusIndicator_.setBusDegraded(true);
 		LOG_WARNING("application", "initialized in degraded state");
-		if (watchdog_.initialize() == adapters::watchdog::WatchdogInitializeResult::RegistrationFailure)
+		if (watchdogHal_.initialize() == hal::WatchdogInitializeResult::RegistrationFailure)
 		{
 			handleWatchdogFailure(nowMs);
 			return ApplicationInitializeResult::WatchdogFailure;
@@ -324,7 +324,7 @@ ApplicationInitializeResult Application::initialize(const std::uint32_t nowMs) n
 
 	static_cast<void>(lifecycle_.enterOperational(nowMs));
 	LOG_INFO("application", "initialized operational");
-	if (watchdog_.initialize() == adapters::watchdog::WatchdogInitializeResult::RegistrationFailure)
+	if (watchdogHal_.initialize() == hal::WatchdogInitializeResult::RegistrationFailure)
 	{
 		handleWatchdogFailure(nowMs);
 		return ApplicationInitializeResult::WatchdogFailure;
@@ -407,7 +407,7 @@ void Application::update(const std::uint32_t nowMs) noexcept
 	publishWebStateEvents(nowMs);
 	webServer_.update(nowMs);
 	static_cast<void>(knx_.poll());
-	if (watchdog_.feed() != adapters::watchdog::WatchdogFeedResult::Fed)
+	if (watchdogHal_.feed() != hal::WatchdogFeedResult::Fed)
 	{
 		handleWatchdogFailure(nowMs);
 	}
@@ -624,7 +624,7 @@ void Application::updateDiagnostics(const std::uint32_t nowMs) noexcept
 {
 	const RuntimeDiagnostics runtime{ESP.getFreeHeap(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap(),
 		ESP.getPsramSize(), ESP.getFreePsram(), ESP.getMinFreePsram(), ESP.getCpuFreqMHz(),
-		static_cast<std::uint8_t>(ESP.getChipCores()), watchdog_.isHealthy()};
+		static_cast<std::uint8_t>(ESP.getChipCores()), watchdogHal_.isHealthy()};
 	diagnostics_.updateRuntime(nowMs, runtime);
 	if (runtime.freeHeapBytes < minimumFreeInternalHeapBytes ||
 		runtime.largestFreeHeapBlockBytes < minimumLargestInternalHeapBlockBytes)

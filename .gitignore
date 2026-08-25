@@ -5,8 +5,12 @@
 .vscode/ipch
 .DS_Store
 .venv/
+__pycache__/
+*.py[cod]
 production-manifests/
 production-secrets/
+factory-work/
+production-records/
 /release/
 *.pem
 *.key

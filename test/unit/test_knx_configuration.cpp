@@ -9,6 +9,7 @@
 #include "../../src/hal/RelayHal.h"
 #include "../../src/hal/RgbLedHal.h"
 #include "../../src/hal/Rs485Hal.h"
+#include "../../src/hal/WatchdogHal.h"
 #include "../../src/app/configuration_service.h"
 #include "../../src/app/diagnostics_service.h"
 #include "../../src/app/wifi_management_service.h"
@@ -35,6 +36,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
+#include <type_traits>
 
 namespace
 {
@@ -47,6 +49,11 @@ static_assert(switch_actuator::adapters::modbus::represent(switch_actuator::doma
 	NMBS_EXCEPTION_ILLEGAL_DATA_ADDRESS);
 static_assert(switch_actuator::adapters::knx::represent(switch_actuator::domain::ErrorCode::Busy) ==
 	switch_actuator::adapters::knx::KnxErrorRepresentation::SilentRejectBusy);
+static_assert(std::is_same_v<switch_actuator::hal::RelayHal, switch_actuator::hal::IRelay>);
+static_assert(std::is_same_v<switch_actuator::hal::ButtonHal, switch_actuator::hal::IButton>);
+static_assert(std::is_same_v<switch_actuator::hal::RgbLedHal, switch_actuator::hal::IIndicator>);
+static_assert(std::is_same_v<switch_actuator::hal::BuzzerHal, switch_actuator::hal::IBuzzer>);
+static_assert(std::is_same_v<switch_actuator::hal::Rs485Hal, switch_actuator::hal::IUart>);
 
 using switch_actuator::domain::Configuration;
 using switch_actuator::domain::ConfigurationValidationError;
@@ -1077,27 +1084,56 @@ std::int32_t writeRs485Hal(void *, const std::uint8_t *, const std::uint16_t cou
 	return count;
 }
 
+switch_actuator::hal::WatchdogInitializeResult initializeWatchdogHal(void *const context) noexcept
+{
+	static_cast<HalFixture *>(context)->initialized = true;
+	return switch_actuator::hal::WatchdogInitializeResult::Initialized;
+}
+
+switch_actuator::hal::WatchdogFeedResult feedWatchdogHal(void *const context) noexcept
+{
+	++static_cast<HalFixture *>(context)->writes;
+	return switch_actuator::hal::WatchdogFeedResult::Fed;
+}
+
+bool watchdogStateHal(void *const context) noexcept
+{
+	return static_cast<HalFixture *>(context)->initialized;
+}
+
 void testHalContractsDispatchAndFailClosed()
 {
 	using namespace switch_actuator;
 	HalFixture fixture{};
-	hal::RelayHal invalidRelay{};
+	hal::IRelay invalidRelay{};
 	TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(hal::RelayHalResult::HardwareFailure),
 		static_cast<std::uint8_t>(invalidRelay.apply({0}, domain::RelayState::On)));
-	hal::ButtonHal button{initializeHal, readButtonHal, &fixture};
+	hal::IButton button{initializeHal, readButtonHal, &fixture};
 	TEST_ASSERT_TRUE(button.initialize());
 	TEST_ASSERT_TRUE(button.isPressed());
-	hal::RgbLedHal rgb{writeRgbHal, &fixture};
-	hal::BuzzerHal buzzer{initializeHal, writeBuzzerHal, &fixture};
-	TEST_ASSERT_TRUE(rgb.write(1, 2, 3));
+	hal::IIndicator indicator{writeRgbHal, &fixture};
+	hal::IBuzzer buzzer{initializeHal, writeBuzzerHal, &fixture};
+	TEST_ASSERT_TRUE(indicator.write(1, 2, 3));
 	TEST_ASSERT_TRUE(buzzer.initialize());
 	TEST_ASSERT_TRUE(buzzer.write(2000, 10));
 	TEST_ASSERT_EQUAL_UINT32(2, fixture.writes);
-	hal::Rs485Hal rs485{readRs485Hal, writeRs485Hal, &fixture};
-	TEST_ASSERT_TRUE(rs485.isValid());
+	hal::IUart uart{readRs485Hal, writeRs485Hal, &fixture};
+	TEST_ASSERT_TRUE(uart.isValid());
 	std::array<std::uint8_t, 4> bytes{};
-	TEST_ASSERT_EQUAL_INT32(4, rs485.read(rs485.context, bytes.data(), bytes.size(), 10));
-	TEST_ASSERT_EQUAL_INT32(4, rs485.write(rs485.context, bytes.data(), bytes.size(), 10));
+	TEST_ASSERT_EQUAL_INT32(4, uart.read(uart.context, bytes.data(), bytes.size(), 10));
+	TEST_ASSERT_EQUAL_INT32(4, uart.write(uart.context, bytes.data(), bytes.size(), 10));
+	hal::IWatchdog invalidWatchdog{};
+	TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(hal::WatchdogInitializeResult::RegistrationFailure),
+		static_cast<std::uint8_t>(invalidWatchdog.initialize()));
+	TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(hal::WatchdogFeedResult::NotInitialized),
+		static_cast<std::uint8_t>(invalidWatchdog.feed()));
+	hal::IWatchdog watchdog{initializeWatchdogHal, feedWatchdogHal, watchdogStateHal, watchdogStateHal, &fixture};
+	TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(hal::WatchdogInitializeResult::Initialized),
+		static_cast<std::uint8_t>(watchdog.initialize()));
+	TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(hal::WatchdogFeedResult::Fed),
+		static_cast<std::uint8_t>(watchdog.feed()));
+	TEST_ASSERT_TRUE(watchdog.isInitialized());
+	TEST_ASSERT_TRUE(watchdog.isHealthy());
 	constexpr std::array<std::uint8_t, 6> relayPins{1, 2, 3, 4, 5, 6};
 	constexpr hal::BoardDescriptor descriptor{"TEST-6CH", "test", "HW-A01",
 		static_cast<std::uint8_t>(relayPins.size()), relayPins.data(),

@@ -37,5 +37,9 @@ private:
 		std::size_t certificateCapacity,
 		char *privateKey,
 		std::size_t privateKeyCapacity) noexcept;
+	[[nodiscard]] static bool certificateFingerprint(void *context,
+		std::string_view certificate,
+		std::uint8_t *output,
+		std::size_t outputSize) noexcept;
 };
 }

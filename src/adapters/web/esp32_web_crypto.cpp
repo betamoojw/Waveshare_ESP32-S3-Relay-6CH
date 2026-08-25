@@ -4,6 +4,7 @@
 #include <mbedtls/md.h>
 #include <mbedtls/pkcs5.h>
 #include <mbedtls/pk.h>
+#include <mbedtls/sha256.h>
 #include <mbedtls/x509_crt.h>
 
 #include <algorithm>
@@ -25,7 +26,7 @@ int hardwareRandom(void *, unsigned char *const output, const std::size_t size) 
 
 ports::WebCryptoPort Esp32WebCrypto::port() noexcept
 {
-	return {random, hmacSha256, verifyPassword, derivePassword, generateIdentity, this};
+	return {random, hmacSha256, verifyPassword, derivePassword, generateIdentity, certificateFingerprint, this};
 }
 
 bool Esp32WebCrypto::random(void *, std::uint8_t *const output, const std::size_t size) noexcept
@@ -140,6 +141,22 @@ bool Esp32WebCrypto::generateIdentity(void *,
 		std::fill_n(certificate, certificateCapacity, '\0');
 		std::fill_n(privateKey, privateKeyCapacity, '\0');
 	}
+	return valid;
+}
+
+bool Esp32WebCrypto::certificateFingerprint(void *,
+	const std::string_view certificate,
+	std::uint8_t *const output,
+	const std::size_t outputSize) noexcept
+{
+	if (certificate.empty() || certificate.back() != '\0' || output == nullptr || outputSize != 32U) return false;
+	mbedtls_x509_crt parsed{};
+	mbedtls_x509_crt_init(&parsed);
+	const auto parseResult = mbedtls_x509_crt_parse(&parsed,
+		reinterpret_cast<const std::uint8_t *>(certificate.data()), certificate.size());
+	const auto valid = parseResult == 0 && parsed.raw.p != nullptr && parsed.raw.len != 0U &&
+		mbedtls_sha256(parsed.raw.p, parsed.raw.len, output, 0) == 0;
+	mbedtls_x509_crt_free(&parsed);
 	return valid;
 }
 }

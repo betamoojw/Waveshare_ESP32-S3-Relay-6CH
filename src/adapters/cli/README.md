@@ -122,12 +122,12 @@ get-button
 
 Production fixtures use `mfg-test snapshot`, `button`, `relay`, `rgb`, `buzzer`, and `safe`. Snapshot and button operations are read-only. Mutating operations require local maintenance authorization; relay requests use the production command path and `safe` queues all channels off and clears indicator overrides. See `design/manufacturing-test-interface.md` for the normative sequence and external fixture requirements.
 
-The host tools in `tools/provisioning/` generate the serial, UUID, product ID,
-hardware revision, ISO 8601 manufacturing date, and nonzero batch. They write
-those values into the factory filesystem configuration, provision device-local
-security material, verify the complete identity through `mfg-test snapshot`,
-and archive a read-only production manifest. Development defaults retain an
-explicit `UNPROVISIONED` identity and never synthesize factory metadata.
+The canonical host tools in `tools/factory/` validate and flash an approved
+release package, generate the serial and UUID, provision identity and
+device-local Web security through physical service mode, verify hardware
+security and safe outputs, and archive a secret-free production record.
+Development defaults retain an explicit `UNPROVISIONED` identity and never
+synthesize factory metadata.
 
 ## Modbus RTU
 

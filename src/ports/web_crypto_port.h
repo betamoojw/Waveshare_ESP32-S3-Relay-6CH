@@ -33,6 +33,10 @@ using WebIdentityGenerateHandler = bool (*)(void *context,
 	std::size_t certificateCapacity,
 	char *privateKey,
 	std::size_t privateKeyCapacity) noexcept;
+using WebCertificateFingerprintHandler = bool (*)(void *context,
+	std::string_view certificate,
+	std::uint8_t *output,
+	std::size_t outputSize) noexcept;
 
 class WebCryptoPort final
 {
@@ -43,9 +47,11 @@ public:
 		WebPasswordVerifyHandler passwordVerifyHandler,
 		WebPasswordDeriveHandler passwordDeriveHandler,
 		WebIdentityGenerateHandler identityGenerateHandler,
+		WebCertificateFingerprintHandler certificateFingerprintHandler,
 		void *context = nullptr) noexcept
 		: randomHandler_{randomHandler}, hmacHandler_{hmacHandler}, passwordVerifyHandler_{passwordVerifyHandler},
-		  passwordDeriveHandler_{passwordDeriveHandler}, identityGenerateHandler_{identityGenerateHandler}, context_{context}
+		  passwordDeriveHandler_{passwordDeriveHandler}, identityGenerateHandler_{identityGenerateHandler},
+		  certificateFingerprintHandler_{certificateFingerprintHandler}, context_{context}
 	{
 	}
 
@@ -90,10 +96,18 @@ public:
 		return identityGenerateHandler_ != nullptr && identityGenerateHandler_(context_, hostName, certificate,
 			certificateCapacity, privateKey, privateKeyCapacity);
 	}
+	[[nodiscard]] bool certificateFingerprint(const std::string_view certificate,
+		std::uint8_t *output,
+		const std::size_t outputSize) const noexcept
+	{
+		return certificateFingerprintHandler_ != nullptr &&
+			certificateFingerprintHandler_(context_, certificate, output, outputSize);
+	}
 	[[nodiscard]] constexpr bool isValid() const noexcept
 	{
 		return randomHandler_ != nullptr && hmacHandler_ != nullptr && passwordVerifyHandler_ != nullptr &&
-			passwordDeriveHandler_ != nullptr && identityGenerateHandler_ != nullptr;
+			passwordDeriveHandler_ != nullptr && identityGenerateHandler_ != nullptr &&
+			certificateFingerprintHandler_ != nullptr;
 	}
 
 private:
@@ -102,6 +116,7 @@ private:
 	WebPasswordVerifyHandler passwordVerifyHandler_{nullptr};
 	WebPasswordDeriveHandler passwordDeriveHandler_{nullptr};
 	WebIdentityGenerateHandler identityGenerateHandler_{nullptr};
+	WebCertificateFingerprintHandler certificateFingerprintHandler_{nullptr};
 	void *context_{nullptr};
 };
 }

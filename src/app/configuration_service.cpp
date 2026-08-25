@@ -44,8 +44,8 @@ namespace
 }
 }
 
-ConfigurationService::ConfigurationService(const ports::SettingsStore settingsStore) noexcept
-	: settingsStore_{settingsStore}
+ConfigurationService::ConfigurationService(const ports::IStorage storage) noexcept
+	: storage_{storage}
 {
 }
 
@@ -60,10 +60,10 @@ ConfigurationInitializeResult ConfigurationService::initialize() noexcept
 	active_ = domain::makeSafeConfiguration();
 	activeConfigurationValid_ = false;
 	lastValidationError_ = domain::ConfigurationValidationError::None;
-	if (settingsStore_.isValid())
+	if (storage_.isValid())
 	{
 		domain::Configuration loaded{};
-		lastLoadResult_ = settingsStore_.load(loaded);
+		lastLoadResult_ = storage_.load(loaded);
 		if (lastLoadResult_ == ports::SettingsLoadResult::Loaded)
 		{
 			lastValidationError_ = domain::validateConfiguration(loaded);
@@ -93,7 +93,7 @@ ConfigurationInitializeResult ConfigurationService::initialize() noexcept
 		}
 	}
 
-	return settingsStore_.isValid() ? ConfigurationInitializeResult::SafeDefaultsApplied
+	return storage_.isValid() ? ConfigurationInitializeResult::SafeDefaultsApplied
 											 : ConfigurationInitializeResult::InvalidStore;
 }
 
@@ -118,7 +118,7 @@ ConfigurationCommitResult ConfigurationService::commit() noexcept
 	}
 
 	const auto restartRequired = transportRestartRequired(active_, *staged_);
-	lastSaveResult_ = settingsStore_.save(*staged_);
+	lastSaveResult_ = storage_.save(*staged_);
 	if (lastSaveResult_ != ports::SettingsSaveResult::Saved)
 	{
 		return ConfigurationCommitResult::PersistenceFailure;

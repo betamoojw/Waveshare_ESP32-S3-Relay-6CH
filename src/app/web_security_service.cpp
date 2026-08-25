@@ -25,7 +25,7 @@ void encodeHex(const std::uint8_t *input, const std::size_t size, char *output) 
 
 WebSecurityService::WebSecurityService(const ports::WebSecurityStore store,
 	const ports::WebCryptoPort crypto,
-	const ports::ClockPort clock) noexcept
+	const ports::IClock clock) noexcept
 	: store_{store}, crypto_{crypto}, clock_{clock}
 {
 }
@@ -313,6 +313,23 @@ bool WebSecurityService::isInitialized() const noexcept
 {
 	const std::lock_guard<std::mutex> lock{mutex_};
 	return initialized_;
+}
+
+bool WebSecurityService::certificateFingerprint(std::array<char, 65> &output) const noexcept
+{
+	const std::lock_guard<std::mutex> lock{mutex_};
+	output.fill('\0');
+	if (!securityIdentityIsValid(record_)) return false;
+	std::array<std::uint8_t, 32> digest{};
+	const auto certificate = std::string_view{record_.certificate.data(),
+		strnlen(record_.certificate.data(), record_.certificate.size()) + 1U};
+	if (!crypto_.certificateFingerprint(certificate, digest.data(), digest.size()))
+		return false;
+	for (std::size_t index = 0; index < digest.size(); ++index)
+	{
+		std::snprintf(output.data() + index * 2U, 3U, "%02x", static_cast<unsigned int>(digest[index]));
+	}
+	return true;
 }
 
 std::string_view WebSecurityService::certificateHandler(void *const context) noexcept

@@ -5,6 +5,7 @@ This directory is the canonical product documentation for the Switch Actuator fi
 ## Architecture
 
 - [System architecture](architecture/system.md): layering, lifecycle, safety, ownership, and runtime constraints.
+- [Boot flow](architecture/boot-flow.md): ordered startup, configuration precedence, relay restore, and lifecycle outcomes.
 - [Network architecture](architecture/network.md): Wi-Fi/Ethernet selection, recovery access point, and network security boundaries.
 - [Filesystem architecture](architecture/filesystem.md): NVS/LittleFS ownership, precedence, recovery, and deployment.
 - [Security architecture](architecture/security.md): build profiles, trust boundaries, credentials, secure boot, and flash encryption.
@@ -21,9 +22,13 @@ This directory is the canonical product documentation for the Switch Actuator fi
 - [Configuration](product/configuration.md): configuration sources, validation, persistence, and reset behavior.
 - [Update](product/update.md): release artifacts, update policy, rollback requirements, and current limitations.
 - [Compatibility](product/compatibility.md): current hardware, firmware, configuration, API, protocol, and filesystem versions.
+- [Diagnostics](product/diagnostics.md): health surfaces, persistent counters, fault interpretation, and secret exclusions.
+- [Recovery](product/recovery.md): configuration, network, reset, and firmware recovery decision paths.
+- [Troubleshooting](product/troubleshooting.md): symptom-driven field and engineering diagnosis.
 
 ## Manufacturing
 
+- [Manufacturing overview](manufacturing/overview.md): roles, station flow, evidence, and acceptance boundaries.
 - [Provisioning](manufacturing/provisioning.md): production station sequence, security prerequisites, and verification.
 - [Factory reset](manufacturing/factory-reset.md): exact remove/preserve contract.
 - [Service mode](manufacturing/service-mode.md): physical entry, authorization, timeout, and serial operations.

@@ -9,7 +9,7 @@ Esp32RgbLedHal::Esp32RgbLedHal(const hal::BoardDescriptor &descriptor) noexcept
 {
 }
 
-hal::RgbLedHal Esp32RgbLedHal::hal() noexcept
+hal::IIndicator Esp32RgbLedHal::hal() noexcept
 {
 	return {writeCallback, this};
 }
@@ -42,7 +42,7 @@ Esp32BuzzerHal::~Esp32BuzzerHal()
 	}
 }
 
-hal::BuzzerHal Esp32BuzzerHal::hal() noexcept
+hal::IBuzzer Esp32BuzzerHal::hal() noexcept
 {
 	return {initializeCallback, writeCallback, this};
 }

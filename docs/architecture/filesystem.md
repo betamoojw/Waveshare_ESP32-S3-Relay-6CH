@@ -92,10 +92,11 @@ pages when the filesystem is unavailable.
 Tokens, private keys, and administrative credentials MUST NOT be placed in
 `/config/` or `/www/`; they belong in protected NVS namespaces. Wi-Fi
 passphrases are part of the data-driven Wi-Fi profile and are written to
-`wifi.json` only by the explicit maintenance `store-config` operation. LittleFS
-is not encrypted, so physical flash access can recover them. The web adapter
-MUST never serve configuration paths, and support exports or downloads must
-redact secrets before serialization.
+`wifi.json` only by the explicit maintenance `store-config` operation. The
+production partition table marks LittleFS encrypted, while development and
+engineering filesystems remain plaintext and must never contain production
+credentials. The web adapter MUST never serve configuration paths, and support
+exports or downloads must redact secrets before serialization.
 
 CLI configuration setters persist transactionally to NVS and do not
 automatically increase LittleFS wear. `store-config` explicitly snapshots the

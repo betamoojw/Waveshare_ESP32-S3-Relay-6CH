@@ -2,7 +2,7 @@
 
 namespace switch_actuator::adapters::button
 {
-ButtonAdapter::ButtonAdapter(const hal::ButtonHal buttonHal, const ButtonEventHandler eventHandler, void *const eventContext) noexcept
+ButtonAdapter::ButtonAdapter(const hal::IButton buttonHal, const ButtonEventHandler eventHandler, void *const eventContext) noexcept
 	: buttonHal_{buttonHal}, eventHandler_{eventHandler}, eventContext_{eventContext}
 {
 }

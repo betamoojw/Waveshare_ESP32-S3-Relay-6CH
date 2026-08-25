@@ -12,8 +12,8 @@ constexpr std::uint32_t commandToneDurationMs{60};
 constexpr std::array<std::uint16_t, 8> maintenanceToneFrequencies{0, 523, 659, 784, 1047, 1319, 1568, 2093};
 }
 
-StatusIndicator::StatusIndicator(const hal::RgbLedHal rgbLedHal, const hal::BuzzerHal buzzerHal) noexcept
-	: rgbLedHal_{rgbLedHal}, buzzerHal_{buzzerHal}
+StatusIndicator::StatusIndicator(const hal::IIndicator indicator, const hal::IBuzzer buzzer) noexcept
+	: indicator_{indicator}, buzzer_{buzzer}
 {
 }
 
@@ -28,12 +28,12 @@ StatusIndicator::~StatusIndicator()
 IndicatorResult StatusIndicator::initialize() noexcept
 {
 	initialized_ = false;
-	if (!rgbLedHal_.isValid() || !buzzerHal_.isValid() || !rgbLedHal_.write(0, 0, 0) || !buzzerHal_.initialize())
+	if (!indicator_.isValid() || !buzzer_.isValid() || !indicator_.write(0, 0, 0) || !buzzer_.initialize())
 	{
 		return IndicatorResult::HardwareFailure;
 	}
 
-	if (!buzzerHal_.write(0, 0))
+	if (!buzzer_.write(0, 0))
 	{
 		return IndicatorResult::HardwareFailure;
 	}
@@ -219,7 +219,7 @@ IndicatorResult StatusIndicator::apply(const OutputState &output) noexcept
 {
 	if (output.red != appliedOutput_.red || output.green != appliedOutput_.green || output.blue != appliedOutput_.blue)
 	{
-		if (!rgbLedHal_.write(output.red, output.green, output.blue))
+		if (!indicator_.write(output.red, output.green, output.blue))
 		{
 			return IndicatorResult::HardwareFailure;
 		}
@@ -227,7 +227,7 @@ IndicatorResult StatusIndicator::apply(const OutputState &output) noexcept
 
 	if (output.toneHz != appliedOutput_.toneHz || output.buzzerDutyPercent != appliedOutput_.buzzerDutyPercent)
 	{
-		if (!buzzerHal_.write(output.toneHz, output.buzzerDutyPercent))
+		if (!buzzer_.write(output.toneHz, output.buzzerDutyPercent))
 		{
 			return IndicatorResult::HardwareFailure;
 		}
@@ -239,8 +239,8 @@ IndicatorResult StatusIndicator::apply(const OutputState &output) noexcept
 
 void StatusIndicator::silenceAndTurnOff() noexcept
 {
-	static_cast<void>(buzzerHal_.write(0, 0));
-	static_cast<void>(rgbLedHal_.write(0, 0, 0));
+	static_cast<void>(buzzer_.write(0, 0));
+	static_cast<void>(indicator_.write(0, 0, 0));
 	appliedOutput_ = offOutput;
 }
 }

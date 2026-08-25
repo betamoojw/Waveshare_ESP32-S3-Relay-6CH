@@ -29,7 +29,7 @@ public:
 	Esp32RelayOutput &operator=(Esp32RelayOutput &&) = delete;
 
 	[[nodiscard]] RelayOutputResult initialize() noexcept;
-	[[nodiscard]] hal::RelayHal hal() noexcept;
+	[[nodiscard]] hal::IRelay hal() noexcept;
 	[[nodiscard]] ports::RelayOutputPort port() noexcept;
 	[[nodiscard]] RelayOutputResult setChannel(std::size_t channel, bool enabled) noexcept;
 	[[nodiscard]] RelayOutputResult allOff() noexcept;

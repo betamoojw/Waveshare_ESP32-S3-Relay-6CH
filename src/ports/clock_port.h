@@ -6,12 +6,12 @@ namespace switch_actuator::ports
 {
 using MonotonicMillisecondsHandler = std::uint32_t (*)(void *context) noexcept;
 
-class ClockPort final
+class IClock final
 {
 public:
-	constexpr ClockPort() noexcept = default;
+	constexpr IClock() noexcept = default;
 
-	constexpr ClockPort(MonotonicMillisecondsHandler handler, void *context = nullptr) noexcept
+	constexpr IClock(MonotonicMillisecondsHandler handler, void *context = nullptr) noexcept
 		: handler_{handler}, context_{context}
 	{
 	}
@@ -30,4 +30,6 @@ private:
 	MonotonicMillisecondsHandler handler_{nullptr};
 	void *context_{nullptr};
 };
+
+using ClockPort = IClock;
 }

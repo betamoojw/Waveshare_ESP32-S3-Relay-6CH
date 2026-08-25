@@ -11,8 +11,8 @@
 #define FILE_SIZE_MAX              8
 
 /* Memories */
-static nmbs_bitfield server_coils = {0};
-static nmbs_bitfield server_inputs = {0};
+static uint8_t server_coils[(COILS_ADDR_MAX / 8) + 1] = {0};
+static uint8_t server_inputs[(INPUTS_ADDR_MAX / 8) + 1] = {0};
 static uint16_t server_holding_registers[HOLDING_REGISTERS_ADDR_MAX + 1] = {0};
 static uint16_t server_input_registers[INPUT_REGISTERS_ADDR_MAX + 1] = {0};
 static uint16_t server_file[FILE_SIZE_MAX];
@@ -131,7 +131,7 @@ nmbs_error handle_write_multiple_coils(uint16_t address, uint16_t quantity, cons
 /* (0x06) Write Single Register */
 nmbs_error handle_write_single_register(uint16_t address, uint16_t value, uint8_t unit_id, void *arg)
 {
-    if (address > HOLDING_REGISTERS_ADDR_MAX + 1)
+    if (address >= HOLDING_REGISTERS_ADDR_MAX + 1)
     {
         return NMBS_EXCEPTION_ILLEGAL_DATA_ADDRESS;
     }
@@ -144,12 +144,12 @@ nmbs_error handle_write_single_register(uint16_t address, uint16_t value, uint8_
 /* (0x05) Write Single Coil */
 nmbs_error handle_write_single_coil(uint16_t address, bool value, uint8_t unit_id, void *arg)
 {
-    if (address > COILS_ADDR_MAX + 1)
+    if (address >= COILS_ADDR_MAX + 1)
     {
         return NMBS_EXCEPTION_ILLEGAL_DATA_ADDRESS;
     }
 
-    nmbs_bitfield_write(server_coils, address, nmbs_bitfield_read(&value, 0));
+    nmbs_bitfield_write(server_coils, address, value);
 
     return NMBS_ERROR_NONE;
 }

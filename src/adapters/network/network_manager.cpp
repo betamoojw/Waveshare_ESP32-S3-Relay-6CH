@@ -138,7 +138,7 @@ ports::NetworkControlPort NetworkManager::controlPort() noexcept
 	return {startWifiScanCallback, connectWifiProfileCallback, applyConfigurationCallback, this};
 }
 
-hal::NetworkHal NetworkManager::hal() noexcept
+hal::INetwork NetworkManager::hal() noexcept
 {
 	return {statusPort(), controlPort()};
 }

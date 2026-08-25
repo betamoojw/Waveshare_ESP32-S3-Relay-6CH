@@ -70,4 +70,30 @@ bool Esp32TaskWatchdog::isHealthy() const noexcept
 {
 	return initialized_ && task_ != nullptr && fedSinceInitialization_ && esp_task_wdt_status(task_) == ESP_OK;
 }
+
+hal::IWatchdog Esp32TaskWatchdog::hal() noexcept
+{
+	return {initializeHandler, feedHandler, initializedHandler, healthyHandler, this};
+}
+
+WatchdogInitializeResult Esp32TaskWatchdog::initializeHandler(void *const context) noexcept
+{
+	return context != nullptr ? static_cast<Esp32TaskWatchdog *>(context)->initialize() :
+		WatchdogInitializeResult::RegistrationFailure;
+}
+
+WatchdogFeedResult Esp32TaskWatchdog::feedHandler(void *const context) noexcept
+{
+	return context != nullptr ? static_cast<Esp32TaskWatchdog *>(context)->feed() : WatchdogFeedResult::NotInitialized;
+}
+
+bool Esp32TaskWatchdog::initializedHandler(void *const context) noexcept
+{
+	return context != nullptr && static_cast<const Esp32TaskWatchdog *>(context)->isInitialized();
+}
+
+bool Esp32TaskWatchdog::healthyHandler(void *const context) noexcept
+{
+	return context != nullptr && static_cast<const Esp32TaskWatchdog *>(context)->isHealthy();
+}
 }

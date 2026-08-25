@@ -775,7 +775,7 @@ void CliAdapter::printManufacturingSnapshot() noexcept
 {
 	const auto &configuration = dependencies_.configurationService->active();
 	const auto &relays = dependencies_.relayService->snapshots();
-	const auto &network = dependencies_.networkManager->statusPort().snapshot();
+	const auto network = dependencies_.networkManager->statusPort().snapshot();
 	const auto role = dependencies_.modbus.role(dependencies_.modbus.context);
 	char output[768]{};
 	std::snprintf(output,
@@ -1669,6 +1669,13 @@ void CliAdapter::handleProvisionWeb(char *const arguments) noexcept
 			"ok=false error=crypto-failure");
 		return;
 	}
+	std::array<char, 65> certificateFingerprint{};
+	if (!dependencies_.webSecurityService->certificateFingerprint(certificateFingerprint))
+	{
+		static_cast<void>(dependencies_.webSecurityService->erase());
+		print("ok=false error=certificate-fingerprint-failure");
+		return;
+	}
 	auto replacement = active;
 	replacement.web.securityProvisioned = true;
 	dependencies_.configurationService->discardStaged();
@@ -1695,7 +1702,11 @@ void CliAdapter::handleProvisionWeb(char *const arguments) noexcept
 	}
 	static_cast<void>(dependencies_.serviceModeService->exit());
 	dependencies_.statusIndicator->setCommissioning(false);
-	print("ok=true result=web-provisioned restart_required=true");
+	char output[160]{};
+	std::snprintf(output, sizeof(output),
+		"ok=true result=web-provisioned certificate_sha256=%s restart_required=true",
+		certificateFingerprint.data());
+	print(output);
 }
 
 bool CliAdapter::authorizeServiceOperation(const app::ServiceModeOperation operation) noexcept
@@ -1717,11 +1728,19 @@ bool CliAdapter::authorizeServiceOperation(const app::ServiceModeOperation opera
 void CliAdapter::printServiceIdentity() noexcept
 {
 	const auto &configuration = dependencies_.configurationService->active();
-	char output[512]{};
+	std::array<char, 65> certificateFingerprint{};
+	const auto hasCertificate = dependencies_.webSecurityService->certificateFingerprint(certificateFingerprint);
+	char knxIndividualAddress[12]{};
+	std::snprintf(knxIndividualAddress, sizeof(knxIndividualAddress), "%u.%u.%u",
+		static_cast<unsigned int>((configuration.knx.individualAddress >> 12U) & 0x0FU),
+		static_cast<unsigned int>((configuration.knx.individualAddress >> 8U) & 0x0FU),
+		static_cast<unsigned int>(configuration.knx.individualAddress & 0xFFU));
+	char output[640]{};
 	std::snprintf(output, sizeof(output),
 		"{\"ok\":true,\"product_id\":\"%s\",\"board_model\":\"%s\",\"hardware_revision\":\"%s\","
 		"\"firmware\":\"%s\",\"device_serial\":\"%s\",\"device_uuid\":\"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\","
-		"\"manufacturing_date\":\"%s\",\"manufacturing_batch\":%lu}",
+		"\"manufacturing_date\":\"%s\",\"manufacturing_batch\":%lu,\"knx_individual_address\":\"%s\","
+		"\"certificate_sha256\":%s%s%s}",
 		configuration.productId.value.data(), configuration.boardModel.data(), configuration.hardwareRevision.data(),
 		dependencies_.diagnostics->snapshot().firmwareVersion.data(), configuration.deviceSerial.data(),
 		configuration.deviceUuid[0], configuration.deviceUuid[1], configuration.deviceUuid[2], configuration.deviceUuid[3],
@@ -1729,7 +1748,9 @@ void CliAdapter::printServiceIdentity() noexcept
 		configuration.deviceUuid[8], configuration.deviceUuid[9], configuration.deviceUuid[10], configuration.deviceUuid[11],
 		configuration.deviceUuid[12], configuration.deviceUuid[13], configuration.deviceUuid[14], configuration.deviceUuid[15],
 		configuration.manufacturingDate.iso8601.data(),
-		static_cast<unsigned long>(configuration.manufacturingBatch));
+		static_cast<unsigned long>(configuration.manufacturingBatch),
+		knxIndividualAddress,
+		hasCertificate ? "\"" : "", hasCertificate ? certificateFingerprint.data() : "null", hasCertificate ? "\"" : "");
 	print(output);
 }
 

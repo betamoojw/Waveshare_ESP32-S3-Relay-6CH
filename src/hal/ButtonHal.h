@@ -5,11 +5,11 @@ namespace switch_actuator::hal
 using ButtonInitializeHandler = bool (*)(void *context) noexcept;
 using ButtonPressedHandler = bool (*)(void *context) noexcept;
 
-class ButtonHal final
+class IButton final
 {
 public:
-	constexpr ButtonHal() noexcept = default;
-	constexpr ButtonHal(const ButtonInitializeHandler initialize,
+	constexpr IButton() noexcept = default;
+	constexpr IButton(const ButtonInitializeHandler initialize,
 		const ButtonPressedHandler pressed,
 		void *const context = nullptr) noexcept
 		: initialize_{initialize}, pressed_{pressed}, context_{context}
@@ -25,4 +25,6 @@ private:
 	ButtonPressedHandler pressed_{nullptr};
 	void *context_{nullptr};
 };
+
+using ButtonHal = IButton;
 }

@@ -6,11 +6,11 @@ namespace switch_actuator::hal
 {
 using RgbLedWriteHandler = bool (*)(void *context, std::uint8_t red, std::uint8_t green, std::uint8_t blue) noexcept;
 
-class RgbLedHal final
+class IIndicator final
 {
 public:
-	constexpr RgbLedHal() noexcept = default;
-	constexpr RgbLedHal(const RgbLedWriteHandler write, void *const context = nullptr) noexcept
+	constexpr IIndicator() noexcept = default;
+	constexpr IIndicator(const RgbLedWriteHandler write, void *const context = nullptr) noexcept
 		: write_{write}, context_{context}
 	{
 	}
@@ -23,4 +23,6 @@ private:
 	RgbLedWriteHandler write_{nullptr};
 	void *context_{nullptr};
 };
+
+using RgbLedHal = IIndicator;
 }

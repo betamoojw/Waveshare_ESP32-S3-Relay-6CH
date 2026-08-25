@@ -59,7 +59,7 @@ class RelayCommandService final
 public:
 	using RelayEventSink = ports::EventSink<domain::RelayStateChanged>;
 
-	RelayCommandService(hal::RelayHal relayHal,
+	RelayCommandService(hal::IRelay relay,
 						RelayEventSink eventSink,
 						CommandArbiter &commandArbiter) noexcept;
 
@@ -88,7 +88,7 @@ private:
 								  std::uint32_t correlationId,
 								  std::uint32_t nowMs) noexcept;
 
-	hal::RelayHal relayHal_;
+	hal::IRelay relay_;
 	RelayEventSink eventSink_;
 	CommandArbiter &commandArbiter_;
 	std::array<domain::RelaySnapshot, domain::relayChannelCount> snapshots_{};

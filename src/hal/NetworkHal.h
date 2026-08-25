@@ -5,9 +5,11 @@
 
 namespace switch_actuator::hal
 {
-struct NetworkHal final
+struct INetwork final
 {
 	ports::NetworkStatusPort status{};
 	ports::NetworkControlPort control{};
 };
+
+using NetworkHal = INetwork;
 }

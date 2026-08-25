@@ -9,7 +9,7 @@ class Esp32ButtonHal final
 {
 public:
 	explicit Esp32ButtonHal(const hal::BoardDescriptor &descriptor) noexcept;
-	[[nodiscard]] hal::ButtonHal hal() noexcept;
+	[[nodiscard]] hal::IButton hal() noexcept;
 
 private:
 	[[nodiscard]] static bool initializeCallback(void *context) noexcept;

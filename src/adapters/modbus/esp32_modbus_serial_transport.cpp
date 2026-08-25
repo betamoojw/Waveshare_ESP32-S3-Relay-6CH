@@ -62,7 +62,7 @@ bool Esp32ModbusSerialTransport::isInitialized() const noexcept
 	return initialized_;
 }
 
-hal::Rs485Hal Esp32ModbusSerialTransport::hal() noexcept
+hal::IUart Esp32ModbusSerialTransport::hal() noexcept
 {
 	return {read, write, this};
 }

@@ -26,7 +26,7 @@ Esp32ButtonHal::Esp32ButtonHal(const hal::BoardDescriptor &descriptor) noexcept
 {
 }
 
-hal::ButtonHal Esp32ButtonHal::hal() noexcept
+hal::IButton Esp32ButtonHal::hal() noexcept
 {
 	return {initializeCallback, pressedCallback, this};
 }

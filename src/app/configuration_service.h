@@ -48,7 +48,7 @@ enum class ConfigurationUserResetResult : std::uint8_t
 class ConfigurationService final
 {
 public:
-	explicit ConfigurationService(ports::SettingsStore settingsStore) noexcept;
+	explicit ConfigurationService(ports::IStorage storage) noexcept;
 
 	void setDefaultSource(ports::ConfigurationSource defaultSource) noexcept;
 	[[nodiscard]] ConfigurationInitializeResult initialize() noexcept;
@@ -71,7 +71,7 @@ private:
 															 const domain::Configuration &replacement) noexcept;
 	[[nodiscard]] static std::uint32_t nextGeneration(std::uint32_t current) noexcept;
 
-	ports::SettingsStore settingsStore_;
+	ports::IStorage storage_;
 	ports::ConfigurationSource defaultSource_;
 	domain::Configuration active_{domain::makeSafeConfiguration()};
 	std::optional<domain::Configuration> staged_{};

@@ -43,7 +43,7 @@ public:
 	void applyCommittedConfiguration(std::uint32_t nowMs) noexcept;
 	[[nodiscard]] ports::NetworkStatusPort statusPort() noexcept;
 	[[nodiscard]] ports::NetworkControlPort controlPort() noexcept;
-	[[nodiscard]] hal::NetworkHal hal() noexcept;
+	[[nodiscard]] hal::INetwork hal() noexcept;
 
 private:
 	static const ports::NetworkStatusSnapshot &statusCallback(void *context) noexcept;

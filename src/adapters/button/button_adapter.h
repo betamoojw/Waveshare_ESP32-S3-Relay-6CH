@@ -42,7 +42,7 @@ enum class ButtonUpdateResult : std::uint8_t
 class ButtonAdapter final
 {
 public:
-	ButtonAdapter(hal::ButtonHal buttonHal, ButtonEventHandler eventHandler, void *eventContext = nullptr) noexcept;
+	ButtonAdapter(hal::IButton buttonHal, ButtonEventHandler eventHandler, void *eventContext = nullptr) noexcept;
 
 	[[nodiscard]] ButtonInitializeResult initialize(std::uint32_t nowMs) noexcept;
 	[[nodiscard]] ButtonUpdateResult update(std::uint32_t nowMs) noexcept;
@@ -59,7 +59,7 @@ private:
 	static constexpr std::uint32_t commissioningHoldDurationMs{3000};
 	static constexpr std::uint32_t factoryResetHoldDurationMs{10000};
 
-	hal::ButtonHal buttonHal_;
+	hal::IButton buttonHal_;
 	ButtonEventHandler eventHandler_;
 	void *eventContext_;
 	std::uint32_t initializedAtMs_{0};

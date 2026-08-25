@@ -28,6 +28,11 @@ SEMANTIC_VERSION = re.compile(
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 FLASH_ARTIFACTS = ("firmware.bin", "bootloader.bin", "partitions.bin", "filesystem.bin")
 SIGNATURE_ALGORITHM = "RSASSA-PSS-SHA256"
+PRIVATE_KEY_MARKERS = (
+    b"-----BEGIN PRIVATE KEY-----",
+    b"-----BEGIN RSA PRIVATE KEY-----",
+    b"-----BEGIN EC PRIVATE KEY-----",
+)
 COMPATIBILITY_VERSIONS = {
     "configuration": "CFG-4",
     "api": "API-v1",
@@ -119,6 +124,15 @@ def validate_inputs(inputs: ReleaseInputs) -> None:
         resolved = path.resolve()
         if output == resolved or output in resolved.parents:
             raise ValueError("release output must not contain an input file")
+    for label, path in (
+        ("firmware", inputs.firmware),
+        ("bootloader", inputs.bootloader),
+        ("partition table", inputs.partitions),
+        ("filesystem", inputs.filesystem),
+    ):
+        content = path.read_bytes()
+        if any(marker in content for marker in PRIVATE_KEY_MARKERS):
+            raise ValueError(f"{label} contains prohibited private key material")
 
 
 def sign_firmware(firmware: Path, signing_key: Path) -> Tuple[bytes, str]:

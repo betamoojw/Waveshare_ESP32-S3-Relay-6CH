@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "flash_capacity_bytes": 8388608,
+  "internal_dram_capacity_bytes": 327680,
+  "max_firmware_binary_bytes": 3000000,
+  "max_firmware_partition_percent": 90,
+  "max_filesystem_image_bytes": 1258291,
+  "max_filesystem_partition_percent": 80,
+  "max_total_flash_image_bytes": 4500000,
+  "max_iram_bytes": 131072,
+  "max_static_dram_bytes": 245760,
+  "min_estimated_heap_headroom_bytes": 81920,
+  "max_stack_frame_bytes": 8192
+}

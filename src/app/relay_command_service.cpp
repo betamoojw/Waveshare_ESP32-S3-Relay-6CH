@@ -4,17 +4,17 @@
 
 namespace switch_actuator::app
 {
-RelayCommandService::RelayCommandService(const hal::RelayHal relayHal,
+RelayCommandService::RelayCommandService(const hal::IRelay relay,
 															 const RelayEventSink eventSink,
 															 CommandArbiter &commandArbiter) noexcept
-	: relayHal_{relayHal}, eventSink_{eventSink}, commandArbiter_{commandArbiter}
+	: relay_{relay}, eventSink_{eventSink}, commandArbiter_{commandArbiter}
 {
 }
 
 RelayServiceInitializeResult RelayCommandService::initialize(const std::uint32_t nowMs) noexcept
 {
 	initialized_ = false;
-	if (!relayHal_.isValid() || !eventSink_.isValid())
+	if (!relay_.isValid() || !eventSink_.isValid())
 	{
 		return RelayServiceInitializeResult::InvalidPort;
 	}
@@ -26,7 +26,7 @@ RelayServiceInitializeResult RelayCommandService::initialize(const std::uint32_t
 		auto &snapshot = snapshots_[channel];
 		snapshot = {};
 		snapshot.lastTransitionAtMs = nowMs;
-		if (relayHal_.apply(domain::RelayChannelId{channel}, domain::RelayState::Off) != hal::RelayHalResult::Applied)
+		if (relay_.apply(domain::RelayChannelId{channel}, domain::RelayState::Off) != hal::RelayHalResult::Applied)
 		{
 			snapshot.fault = domain::RelayFault::OutputFailure;
 			snapshot.lockedOut = true;
@@ -60,7 +60,7 @@ RelayCommandResult RelayCommandService::execute(const domain::RelayCommand &comm
 		return {RelayCommandStatus::Accepted, RelayCommandReason::None, command.correlationId, snapshot.appliedState};
 	}
 
-	if (relayHal_.apply(command.channel, desiredState) != hal::RelayHalResult::Applied)
+	if (relay_.apply(command.channel, desiredState) != hal::RelayHalResult::Applied)
 	{
 		snapshot.fault = domain::RelayFault::OutputFailure;
 		snapshot.lockedOut = true;
@@ -121,7 +121,7 @@ RelayCommandBatchResult RelayCommandService::executeBatch(const domain::RelayCom
 		{
 			continue;
 		}
-		if (relayHal_.apply(commands[index].channel, desiredStates[index]) == hal::RelayHalResult::Applied)
+		if (relay_.apply(commands[index].channel, desiredStates[index]) == hal::RelayHalResult::Applied)
 		{
 			outputApplied[index] = true;
 			continue;
@@ -140,7 +140,7 @@ RelayCommandBatchResult RelayCommandService::executeBatch(const domain::RelayCom
 			{
 				continue;
 			}
-			if (relayHal_.apply(commands[rollbackIndex].channel, previousStates[rollbackIndex]) !=
+			if (relay_.apply(commands[rollbackIndex].channel, previousStates[rollbackIndex]) !=
 				hal::RelayHalResult::Applied)
 			{
 				auto &rollbackSnapshot = snapshots_[commands[rollbackIndex].channel.value];
@@ -330,7 +330,7 @@ bool RelayCommandService::forceSafeOff(const domain::RelayChannelId channel,
 									   const std::uint32_t correlationId,
 									   const std::uint32_t nowMs) noexcept
 {
-	if (relayHal_.apply(channel, domain::RelayState::Off) != hal::RelayHalResult::Applied)
+	if (relay_.apply(channel, domain::RelayState::Off) != hal::RelayHalResult::Applied)
 	{
 		return false;
 	}

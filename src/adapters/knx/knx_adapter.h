@@ -37,7 +37,7 @@ struct KnxAdapterDependencies final
 	app::SwitchingPolicyService *switchingPolicy;
 	app::RelayCommandService *relayService;
 	app::DiagnosticsService *diagnostics;
-	ports::ClockPort clock;
+	ports::IClock clock;
 	ports::NetworkStatusPort networkStatus;
 };
 

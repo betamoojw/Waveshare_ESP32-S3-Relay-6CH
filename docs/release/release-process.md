@@ -73,6 +73,7 @@ The GitHub `production` environment must provide:
 | Input | Purpose |
 |---|---|
 | `PRODUCTION_SIGNING_KEY_PEM_BASE64` secret | Secure Boot v2 application signing key |
+| `PRODUCTION_SECURE_BOOT_KEY_DIGEST` variable | Approved 64-hex Secure Boot v2 public-key digest; rejects wrong production signing keys |
 | `RELEASE_SIGNING_KEY_PEM_BASE64` secret | Separate unencrypted RSA key, at least 3072 bits, for detached OTA signatures |
 | `PRODUCTION_BOOTLOADER_BIN_BASE64` secret | Approved signed bootloader image |
 | `MINIMUM_FIRMWARE_VERSION` variable | Oldest version allowed by compatibility policy; defaults to the release version |
@@ -90,6 +91,20 @@ The secure-boot and OTA keys are intentionally separate. CI decodes them only in
 6. Generate SPDX metadata and checksums.
 7. Upload the complete directory as the `release-package` workflow artifact.
 8. Attach every package file to the GitHub release.
+
+Before packaging, CI enforces the reviewed budgets in
+`tools/analysis/resource_limits.json` against the production ELF, signed binary,
+LittleFS image, binary partition table, linker map, and GCC stack-usage files.
+The JSON resource report and linker map are retained as release evidence. A
+budget violation blocks the release; changing a budget requires review against
+measured engineering and production reports.
+
+The build hook derives the Secure Boot public-key digest from the protected
+private key and compares it with `PRODUCTION_SECURE_BOOT_KEY_DIGEST` before
+signing. It then verifies the produced signature. Release packaging rejects an
+unsigned application filename and scans every flashable artifact for PEM
+private-key material. Manufacturing independently verifies bootloader and
+application signatures with a public key held in the station trust store.
 
 The workflow fails if an input is absent, a Secure Boot signature is invalid, a version is not semantic, the firmware filename does not identify a signed image, the signing key is not RSA 3072 bits or stronger, or any source artifact cannot be read.
 

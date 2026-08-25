@@ -750,7 +750,7 @@ bool NvsSettingsStore::saveDiagnosticCounters(const domain::PersistentDiagnostic
 	return initialized_ && persistDiagnosticCounters(preferences_, counters);
 }
 
-ports::SettingsStore NvsSettingsStore::port() noexcept
+ports::IStorage NvsSettingsStore::port() noexcept
 {
 	return {loadCallback, saveCallback, eraseCallback, this};
 }

@@ -13,7 +13,7 @@ struct ModbusConfigurationGatewayDependencies final
 	app::ConfigurationService *configurationService{nullptr};
 	app::LifecycleSupervisor *lifecycleSupervisor{nullptr};
 	app::DiagnosticsService *diagnostics{nullptr};
-	ports::ClockPort clock{};
+	ports::IClock clock{};
 };
 
 class ModbusConfigurationGateway final

@@ -45,7 +45,7 @@ struct MaintenanceIndicatorState final
 class StatusIndicator final
 {
 public:
-	StatusIndicator(hal::RgbLedHal rgbLedHal, hal::BuzzerHal buzzerHal) noexcept;
+	StatusIndicator(hal::IIndicator indicator, hal::IBuzzer buzzer) noexcept;
 	~StatusIndicator();
 
 	StatusIndicator(const StatusIndicator &) = delete;
@@ -101,8 +101,8 @@ private:
 	static constexpr std::uint32_t maintenanceDurationMs{5000};
 	static constexpr std::uint32_t maintenanceToneDurationMs{100};
 
-	hal::RgbLedHal rgbLedHal_;
-	hal::BuzzerHal buzzerHal_;
+	hal::IIndicator indicator_;
+	hal::IBuzzer buzzer_;
 	OutputState appliedOutput_{};
 	CommandFeedback commandFeedback_{CommandFeedback::Accepted};
 	std::uint32_t commandFeedbackStartedAtMs_{0};

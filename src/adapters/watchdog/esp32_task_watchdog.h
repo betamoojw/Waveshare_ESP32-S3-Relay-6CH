@@ -1,25 +1,14 @@
 #pragma once
 
+#include "../../hal/WatchdogHal.h"
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#include <cstdint>
-
 namespace switch_actuator::adapters::watchdog
 {
-enum class WatchdogInitializeResult : std::uint8_t
-{
-	Initialized,
-	AlreadyInitialized,
-	RegistrationFailure
-};
-
-enum class WatchdogFeedResult : std::uint8_t
-{
-	Fed,
-	NotInitialized,
-	FeedFailure
-};
+using WatchdogInitializeResult = hal::WatchdogInitializeResult;
+using WatchdogFeedResult = hal::WatchdogFeedResult;
 
 class Esp32TaskWatchdog final
 {
@@ -36,8 +25,14 @@ public:
 	[[nodiscard]] WatchdogFeedResult feed() noexcept;
 	[[nodiscard]] bool isInitialized() const noexcept;
 	[[nodiscard]] bool isHealthy() const noexcept;
+	[[nodiscard]] hal::IWatchdog hal() noexcept;
 
 private:
+	[[nodiscard]] static WatchdogInitializeResult initializeHandler(void *context) noexcept;
+	[[nodiscard]] static WatchdogFeedResult feedHandler(void *context) noexcept;
+	[[nodiscard]] static bool initializedHandler(void *context) noexcept;
+	[[nodiscard]] static bool healthyHandler(void *context) noexcept;
+
 	bool initialized_{false};
 	bool ownsRegistration_{false};
 	bool fedSinceInitialization_{false};

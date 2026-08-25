@@ -127,6 +127,15 @@ class ReleasePackageTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Secure Boot v2"):
             create_release_package(self.release_inputs(firmware=unsigned))
 
+    def test_rejects_private_key_material_in_flash_artifact(self) -> None:
+        compromised = self.write_input(
+            "firmware-production-v1.2.3-signed.bin",
+            b"image\0-----BEGIN PRIVATE KEY-----\0secret",
+        )
+
+        with self.assertRaisesRegex(ValueError, "private key material"):
+            create_release_package(self.release_inputs(firmware=compromised))
+
     def test_rejects_output_containing_inputs(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not contain"):
             create_release_package(self.release_inputs(output=self.root), force=True)

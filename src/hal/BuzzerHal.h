@@ -7,11 +7,11 @@ namespace switch_actuator::hal
 using BuzzerInitializeHandler = bool (*)(void *context) noexcept;
 using BuzzerWriteHandler = bool (*)(void *context, std::uint16_t frequencyHz, std::uint8_t dutyPercent) noexcept;
 
-class BuzzerHal final
+class IBuzzer final
 {
 public:
-	constexpr BuzzerHal() noexcept = default;
-	constexpr BuzzerHal(const BuzzerInitializeHandler initialize,
+	constexpr IBuzzer() noexcept = default;
+	constexpr IBuzzer(const BuzzerInitializeHandler initialize,
 		const BuzzerWriteHandler write,
 		void *const context = nullptr) noexcept
 		: initialize_{initialize}, write_{write}, context_{context}
@@ -28,4 +28,6 @@ private:
 	BuzzerWriteHandler write_{nullptr};
 	void *context_{nullptr};
 };
+
+using BuzzerHal = IBuzzer;
 }

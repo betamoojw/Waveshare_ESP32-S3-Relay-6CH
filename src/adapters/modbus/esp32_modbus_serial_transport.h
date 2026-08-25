@@ -33,7 +33,7 @@ public:
 	[[nodiscard]] SerialTransportInitializeResult initialize(const ModbusRtuConfiguration &configuration) noexcept;
 	void shutdown() noexcept;
 	[[nodiscard]] bool isInitialized() const noexcept;
-	[[nodiscard]] hal::Rs485Hal hal() noexcept;
+	[[nodiscard]] hal::IUart hal() noexcept;
 
 	[[nodiscard]] static std::int32_t read(void *context,
 										std::uint8_t *buffer,

@@ -72,7 +72,7 @@ class WebSecurityService final
 public:
 	WebSecurityService(ports::WebSecurityStore store,
 		ports::WebCryptoPort crypto,
-		ports::ClockPort clock) noexcept;
+		ports::IClock clock) noexcept;
 
 	[[nodiscard]] WebSecurityInitializeResult initialize(std::string_view expectedOrigin,
 		std::string_view expectedHost) noexcept;
@@ -98,6 +98,7 @@ public:
 	[[nodiscard]] ports::WebSecurityStoreResult erase() noexcept;
 	[[nodiscard]] ports::WebSecurityPort port() noexcept;
 	[[nodiscard]] bool isInitialized() const noexcept;
+	[[nodiscard]] bool certificateFingerprint(std::array<char, 65> &output) const noexcept;
 
 private:
 	static constexpr std::uint32_t accessLifetimeMs{15U * 60U * 1000U};
@@ -160,7 +161,7 @@ private:
 
 	ports::WebSecurityStore store_;
 	ports::WebCryptoPort crypto_;
-	ports::ClockPort clock_;
+	ports::IClock clock_;
 	mutable std::mutex mutex_{};
 	ports::WebSecurityRecord record_{};
 	std::array<Session, ports::webSessionCapacity> sessions_{};
